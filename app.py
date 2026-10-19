@@ -1,0 +1,48 @@
+"""Run: streamlit run app.py"""
+from __future__ import annotations
+import hashlib
+import streamlit as st
+from converter import extract_pdf, build_workbook
+
+st.set_page_config(page_title="PDF to Excel Studio",page_icon="📊",layout="wide")
+st.title("PDF to Excel Studio")
+st.write("Upload multiple PDFs and get **one editable Excel workbook**, with **one worksheet per PDF**.")
+st.caption("Prototype: works best with selectable-text PDFs and university program sheets. Scanned/image-only PDFs are not supported yet.")
+
+files=st.file_uploader("Upload PDF files",type=["pdf"],accept_multiple_files=True)
+totals=st.checkbox("Add automatic totals where appropriate",value=True,help="For safety, automatic formulas are added only to Credits columns detected in program sheets. Other numeric fields aren't assumed additive.")
+st.info("Clean spreadsheet styling, filters, frozen headings, and worksheet tabs are always enabled.")
+
+if files:
+    if len(files)>15:
+        st.error("Maximum 15 PDFs per conversion in this prototype.")
+        st.stop()
+    items=[]
+    # Stable keys preserve edits across Streamlit reruns.
+    for idx,up in enumerate(files):
+        raw=up.getvalue()
+        with st.expander(f"{up.name}",expanded=(idx==0)):
+            if len(raw)>15*1024*1024:
+                st.error("File exceeds 15 MB. Skipped.")
+                continue
+            try:
+                signature=hashlib.sha256(raw).hexdigest()
+                cache_key=f"parsed_{signature}"
+                if cache_key not in st.session_state:
+                    st.session_state[cache_key]=extract_pdf(raw,up.name)
+                original, meta=st.session_state[cache_key]
+                st.write(f"**Detected:** {meta['mode']} · **Pages:** {meta['pages']} · **Rows:** {meta['rows']}")
+                st.caption(meta['warning'])
+                edited=st.data_editor(original,key=f"editor_{signature}",num_rows="dynamic",hide_index=True,use_container_width=True)
+                if meta['mode']=="Program sheet":
+                    st.caption("Credits are totaled in Excel when enabled. Review titles and credit values before downloading.")
+                items.append((up.name,edited,meta["mode"]))
+            except Exception as ex:
+                st.error(f"Could not process this file: {ex}")
+    if items:
+        try:
+            workbook=build_workbook(items,add_totals=totals)
+            st.download_button("Download Excel workbook",data=workbook,file_name="converted_pdfs.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",type="primary")
+            st.caption("Files are processed in this app session. This prototype has no database, user accounts, or remote AI calls. If deployed online, the server still receives your uploads.")
+        except Exception as ex:
+            st.error(f"Could not create workbook: {ex}")
