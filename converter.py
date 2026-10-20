@@ -265,7 +265,7 @@ def _single_column_program_rows(doc: fitz.Document) -> tuple[pd.DataFrame, pd.Da
             active.append({"Type": "Note", "Code": "", "Course / Requirement": line, "Credits": None, "Page": 1})
             continue
         code = f"{match.group(1)} {match.group(2)}" if match else ""
-        title = line[match.end():].strip(" -") if match else "Religious Studies course (to be selected)"
+        title = line[match.end():].strip(" -") if match else "Religious Studies course (to be selected)" + (re.search(r"\\s+([1-9]|1[0-2])\\s*$", line).group(0) if re.search(r"\\s+([1-9]|1[0-2])\\s*$", line) else "")
         credit_match = re.search(r"\\s+([1-9]|1[0-2])\\s*$", title)
         credits = int(credit_match.group(1)) if credit_match else None
         if credit_match:
