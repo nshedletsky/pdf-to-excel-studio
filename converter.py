@@ -239,8 +239,8 @@ def _single_column_program_rows(doc: fitz.Document) -> tuple[pd.DataFrame, pd.Da
     page = doc[0]
     words = page.get_text("words")
     all_text = page.get_text()
-    if not (re.search(r"(?im)^General Education\\s*$", all_text)
-            and re.search(r"(?im)^Major Classes\\s*$", all_text)):
+    if not (re.search(r"(?im)^General Education\s*$", all_text)
+            and re.search(r"(?im)^Major Classes\s*$", all_text)):
         return None
     # Other program sheets have full course descriptions on the right.
     if any(w[4].isalpha() and (w[0]+w[2])/2 > page.rect.width * .60 for w in words):
@@ -260,13 +260,13 @@ def _single_column_program_rows(doc: fitz.Document) -> tuple[pd.DataFrame, pd.Da
         if active is None or re.search(r"(?:General Education|Major Classes|Program) Total", line, re.I):
             continue
         match = LAYOUT_CODE_RE.match(line)
-        blank_rs = re.match(r"^(RS)\\s+-{2,}", line)
+        blank_rs = re.match(r"^(RS)\s+-{2,}", line)
         if not match and not blank_rs:
             active.append({"Type": "Note", "Code": "", "Course / Requirement": line, "Credits": None, "Page": 1})
             continue
         code = f"{match.group(1)} {match.group(2)}" if match else ""
-        title = line[match.end():].strip(" -") if match else "Religious Studies course (to be selected)" + (re.search(r"\\s+([1-9]|1[0-2])\\s*$", line).group(0) if re.search(r"\\s+([1-9]|1[0-2])\\s*$", line) else "")
-        credit_match = re.search(r"\\s+([1-9]|1[0-2])\\s*$", title)
+        title = line[match.end():].strip(" -") if match else "Religious Studies course (to be selected)" + (re.search(r"\s+([1-9]|1[0-2])\s*$", line).group(0) if re.search(r"\s+([1-9]|1[0-2])\s*$", line) else "")
+        credit_match = re.search(r"\s+([1-9]|1[0-2])\s*$", title)
         credits = int(credit_match.group(1)) if credit_match else None
         if credit_match:
             title = title[:credit_match.start()].strip()
