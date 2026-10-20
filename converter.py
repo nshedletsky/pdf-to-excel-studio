@@ -47,33 +47,50 @@ def _lines_in_column(words: list[tuple], x_min: float, x_max: float) -> list[tup
 
 
 def _course_rows(pdf_bytes: bytes) -> list[dict[str, Any]]:
+    """Extract course entries by their visual columns, never from trailing numbers."""
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     result: list[dict[str, Any]] = []
     for page_idx, page in enumerate(doc, 1):
         words = page.get_text("words")
         mid = page.rect.width / 2
-        # Use two columns only when BOTH halves contain course codes.
-        right_lines = _lines_in_column(words, mid, page.rect.width+1)
-        right_courses = sum(bool(COURSE_RE.search(line[2])) for line in right_lines)
-        columns = (("Left",0,mid),("Right",mid,page.rect.width+1)) if right_courses >= 2 else (("Full",0,page.rect.width+1),)
-        for side, lo, hi in columns:
+        for side, lo, hi in (("Left", 0, mid-5), ("Right", mid-5, page.rect.width+1)):
             lines = _lines_in_column(words, lo, hi)
-            section = "General"
-            for _, _, text in lines:
-                match = COURSE_RE.search(text)
-                if not match:
-                    if text and not re.search(r"student (name|id)|phone|email|mailing|entry date", text, re.I):
-                        if ("hours" in text.lower() or "core" in text.lower() or "elective" in text.lower() or "major" in text.lower() or "concentration" in text.lower()) and len(text) < 85:
-                            section = text
+            section = "Uncategorized"
+            for y, x, line in lines:
+                m = re.match(r"^\s*(?:[_•☐✓]+\s*)?([A-Z]{2,5})\s*[- ]?\s*(\d{3}[A-Z]?)(?:[\*†]*)\b", line)
+                if not m:
+                    if line and len(line) < 92 and not re.search(r"student (name|id)|phone|email|mailing|entry date", line, re.I):
+                        if re.search(r"(\b(?:major|core|concentration|electives|social sciences|humanities|religious studies|communication|natural sciences|prerequisites|term [1-9])\b)",line,re.I):
+                            section = line
                     continue
-                code = f"{match.group(1)} {match.group(2)}"
-                tail = text[match.end():].strip(" -:_")
-                credit_match = re.search(r"\(?([1-9]\d?(?:\.\d+)?)\)?\s*$", tail)
-                credits = float(credit_match.group(1)) if credit_match else None
-                title = tail[:credit_match.start()].strip() if credit_match else tail
-                if not title or len(title) > 160:
+                code=f"{m.group(1)} {m.group(2)}"
+                row_words=[w for w in words if lo <= (w[0]+w[2])/2 < hi and abs(w[1]-y)<=3.0]
+                row_words.sort(key=lambda w:w[0])
+                start_x=next((w[0] for w in row_words if w[4]==m.group(1)), x)
+                if side=="Left":
+                    credit_band=(hi-33,hi-4)
+                elif start_x >= mid+30:
+                    credit_band=(page.rect.width-52,page.rect.width-25)
+                else:
+                    credit_band=(mid+165,mid+187)
+                candidate=[]
+                for w in row_words:
+                    center=(w[0]+w[2])/2
+                    t=w[4].strip()
+                    if credit_band[0] <= center <= credit_band[1] and re.fullmatch(r"(?:[1-9]|1[0-2])(?:\.5)?", t):
+                        candidate.append((center,float(t)))
+                credit=candidate[-1][1] if len(candidate)==1 else None
+                code_end=next((w[2] for w in row_words if re.match(r"^"+re.escape(m.group(2))+r"[\*†]*$",w[4])),start_x+45)
+                title_words=[w[4] for w in row_words if w[0]>=code_end-1 and (w[0]+w[2])/2 < credit_band[0]-3]
+                title=" ".join(title_words).strip(" -*:†")
+                if not title or len(title)>160:
                     continue
-                result.append({"Page":page_idx,"Section":section,"Course":code,"Title":title,"Credits":credits,"Source side":side})
+                clinical=None
+                if side=="Right":
+                    far=[(w[0],w[4]) for w in row_words if w[0]>=page.rect.width-58 and re.fullmatch(r"\d+(?:\.\d+)?",w[4])]
+                    if section.lower().startswith("term ") and far:
+                        clinical=float(far[-1][1])
+                result.append({"Page":page_idx,"Section":section,"Course":code,"Title":title,"Credits":credit,"Clinical Hours":clinical,"Source side":side})
     return result
 
 
@@ -118,7 +135,7 @@ def extract_pdf(pdf_bytes: bytes, filename: str) -> tuple[pd.DataFrame, dict]:
         else:
             df = pd.DataFrame(_text_rows(pdf_bytes))
             kind = "Text lines"
-    return df, {"filename":filename,"pages":pages,"mode":kind,"rows":len(df),"warning":("Check course titles and credits against the original PDF, especially wrapped rows and two-column layouts." if kind == "Program sheet" else "Check extraction against the PDF; layout may not be fully preserved.")}
+    return df, {"filename":filename,"pages":pages,"mode":kind,"rows":len(df),"warning":("Review the extracted rows. Missing or duplicate courses suppress automatic totals. This is not a degree audit." if kind == "Program sheet" else "Check extraction against the PDF; layout may not be fully preserved.")}
 
 
 def _as_number(value: Any) -> float | None:
@@ -136,10 +153,15 @@ def _as_number(value: Any) -> float | None:
 
 
 def infer_additive_columns(frame: pd.DataFrame, mode: str) -> list[str]:
-    """Conservative by design: auto-total only explicit Credits columns in program sheets."""
-    if mode != "Program sheet":
+    """Only total complete, unique credit-hour columns in program sheets."""
+    if mode != "Program sheet" or "Credits" not in frame or "Course" not in frame:
         return []
-    return [c for c in frame.columns if str(c).casefold().strip() == "credits" and sum(_as_number(v) is not None for v in frame[c]) >= 2]
+    credits = [_as_number(v) for v in frame["Credits"]]
+    if any(v is None for v in credits):
+        return []
+    if frame["Course"].astype(str).duplicated().any():
+        return []
+    return ["Credits"] if len(credits) >= 2 else []
 
 
 def build_workbook(items: list[tuple[str,pd.DataFrame,str]], add_totals: bool=True) -> bytes:
@@ -186,7 +208,7 @@ def build_workbook(items: list[tuple[str,pd.DataFrame,str]], add_totals: bool=Tr
         if add_totals:
             for c in infer_additive_columns(data,mode):
                 j=cols.index(c)
-                sheet.write(last+2, max(0,j-1),"Calculated total",total)
+                sheet.write(last+2, max(0,j-1),"Sum of extracted credits (not degree total)",total)
                 letter=xlsxwriter.utility.xl_col_to_name(j)
                 sheet.write_formula(last+2,j,f"=SUM({letter}4:{letter}{last+1})",total)
         sheet.set_landscape()
