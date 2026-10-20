@@ -321,6 +321,7 @@ def build_layout_workbook(items: list[tuple[str, pd.DataFrame, pd.DataFrame]]) -
         summaries=[]
         ends=[]
         side_values=[]
+        preferred_break=None
         for data, cols in ((left,("A","B","C","D")),(right,("F","G","H","I"))):
             flag,code,title,hours=cols
             row=5
@@ -333,6 +334,8 @@ def build_layout_workbook(items: list[tuple[str, pd.DataFrame, pd.DataFrame]]) -
                 label=str(item["Course / Requirement"] if pd.notna(item["Course / Requirement"]) else "")
                 number=item["Credits"]
                 if kind=="Section":
+                    if flag=="A" and re.search(r"natural science",label,re.I):
+                        preferred_break=row-1
                     if credit_cells:
                         ws.write(f"{title}{row}","Section subtotal",subtotal)
                         ws.write_formula(f"{hours}{row}","=SUM("+",".join(credit_cells)+")",subtotal,sum(credit_values))
@@ -378,6 +381,8 @@ def build_layout_workbook(items: list[tuple[str, pd.DataFrame, pd.DataFrame]]) -
         ws.merge_range(f"A{bottom+4}:I{bottom+5}","REVIEW BEFORE APPROVAL: Blank requirements, reused courses, OCR/layout ambiguities and electives may affect totals. Compare against the source PDF. These totals are not an official degree audit.",caution)
         ws.freeze_panes(4,0)
         ws.set_landscape();ws.set_paper(5);ws.fit_to_pages(1,0)
+        if preferred_break is not None and preferred_break>10:
+            ws.set_h_pagebreaks([preferred_break])
         ws.set_margins(.2,.2,.3,.3)
         ws.print_area(0,0,bottom+4,8)
         ws.center_horizontally()
