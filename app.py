@@ -5,7 +5,7 @@ import streamlit as st
 from converter import extract_pdf, build_workbook, layout_rows, build_layout_workbook
 
 st.set_page_config(page_title="PDF to Excel for Jane!",page_icon="📊",layout="wide")
-st.title("PDF to Excel")
+st.title("PDF to Excel for Jane")
 st.write("Upload multiple PDFs and get one editable Excel workbook, with one worksheet per PDF.")
 st.caption("Prototype: works best with selectable-text PDFs. Scanned/image-only PDFs are not supported yet.")
 
