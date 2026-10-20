@@ -236,6 +236,7 @@ def layout_rows(pdf_bytes: bytes) -> tuple[pd.DataFrame, pd.DataFrame]:
         midpoint = page.rect.width / 2
         for index, (lo, hi) in enumerate(((0, midpoint), (midpoint, page.rect.width+1))):
             lines = _lines_in_column(page.get_text("words"), lo, hi)
+            started = False
             for y, x, label in lines:
                 # Student identity fields belong in the header, not curriculum requirements.
                 if re.search(r"^(student (name|id)|entry date|phone number|email address|mailing address)", label, re.I):
@@ -243,13 +244,28 @@ def layout_rows(pdf_bytes: bytes) -> tuple[pd.DataFrame, pd.DataFrame]:
                 if not label.strip() or re.fullmatch(r"[_\s]+", label):
                     continue
                 text = re.sub(r"^\s*(?:(?:_{2,}\s*)+|[☐□]+\s*)", "", label).strip()
+                # The title block isn't curriculum content. Keep it in the
+                # workbook title, not as zero-credit sections on the left.
+                if not started:
+                    if index == 0 and re.search(r"^UNIVERSITY STUDIES PROGRAM",text,re.I):
+                        started = True
+                    elif index == 1 and re.search(r"^(?:Business Major|Major Courses|Required Prerequisites|Upper Division|Core Courses|Program Requirements)",text,re.I):
+                        started = True
+                    else:
+                        continue
                 m = LAYOUT_CODE_RE.search(text)
                 placeholder = bool(re.match(r"^(?:_{2,}|[A-Z]{2,5}_{2,})(?:\s|$)", text))
                 number = None
                 code = ""
                 kind = "Note"
                 title = text
-                if m and m.start() < 22:
+                if re.fullmatch(r"[1-9]|1[0-2]",text):
+                    # Standalone amounts represent unnamed requirements/electives,
+                    # not notes. These must remain editable.
+                    kind = "Elective / blank"
+                    title = "Elective / unspecified requirement"
+                    number = int(text)
+                elif m and m.start() < 22:
                     kind = "Course"
                     code = f"{m.group(1)} {m.group(2)}"
                     title = text[m.end():].strip(" _*†:-")
@@ -260,7 +276,7 @@ def layout_rows(pdf_bytes: bytes) -> tuple[pd.DataFrame, pd.DataFrame]:
                     kind = "Section"
                 # Only parse a single credit figure at the very end, and never
                 # mistake clinical, contact, or total-hour values for course credits.
-                if kind in ("Course", "Elective / blank"):
+                if kind in ("Course", "Elective / blank") and number is None:
                     credit = re.search(r"\s+([1-9]|1[0-2])\s*$",title)
                     glued = re.search(r"(?<=[A-Za-z])([1-9])$",title)
                     if credit:
