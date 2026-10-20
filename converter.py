@@ -563,7 +563,7 @@ def graduate_rows(pdf_bytes: bytes) -> pd.DataFrame:
                 after_curriculum=True
             course=course_rx.match(line)
             if course and in_curriculum and not after_curriculum:
-                rest=re.sub(r"\s+_{2,}.*$","",course.group(3)).strip()
+                rest=re.sub(r"\s+_{2,}(?:/[^\s]+)?(?:\s+.*)?$","",course.group(3)).strip()
                 credit_match=re.search(r"\s+([1-9]|1[0-2])\s*$",rest)
                 credits=int(credit_match.group(1)) if credit_match else None
                 title=rest[:credit_match.start()].strip() if credit_match else rest
