@@ -286,9 +286,84 @@ def _single_column_program_rows(doc: fitz.Document) -> tuple[pd.DataFrame, pd.Da
     return pd.DataFrame(left, columns=columns), pd.DataFrame(right, columns=columns)
 
 
+
+def _graduate_stacked_program_rows(doc: fitz.Document) -> tuple[pd.DataFrame, pd.DataFrame] | None:
+    """Extract graduate course tables where courses are stacked, not two visual columns."""
+    if len(doc) != 1:
+        return None
+    text = doc[0].get_text(sort=True)
+    lines = text.splitlines()
+    columns = ["Type", "Code", "Course / Requirement", "Credits", "Page"]
+    def entry(kind, title, code="", credits=None):
+        return {"Type": kind, "Code": code, "Course / Requirement": title, "Credits": credits, "Page": 1}
+
+    if ("MASTER OF SOCIAL WORK/REGULAR PROGRAM" in text
+            and "GENERALIST YEAR" in text and "ADVANCED GENERALIST YEAR" in text):
+        left = [entry("Section", "Generalist Year")]
+        right = [entry("Section", "Advanced Generalist Year")]
+        current = None
+        for line in lines:
+            if re.search(r"^\s*I\.\s+GENERALIST YEAR", line):
+                current = left
+                continue
+            if re.search(r"^\s*II\.\s+ADVANCED GENERALIST YEAR", line):
+                current = right
+                continue
+            if current is None:
+                continue
+            match = re.match(r"^\s*(SW)\s+(\d{3})\s*:\s*(.+?)\s+(\d+)\s+_{2,}", line)
+            if match:
+                current.append(entry("Course", match.group(3).strip(), f"{match.group(1)} {match.group(2)}", int(match.group(4))))
+            else:
+                elective = re.match(r"^\s*ELECTIVE Courses\s+(.+?)\s+(\d+)\s+_{2,}", line, re.I)
+                if elective:
+                    current.append(entry("Elective / blank", "Elective course (3 credit hours)", credits=int(elective.group(2))))
+        if sum(r["Type"] == "Course" for r in left+right) >= 20:
+            return pd.DataFrame(left,columns=columns), pd.DataFrame(right,columns=columns)
+
+    if ("MAT TRAD BUSINESS & MARKETING EDUCATION" in text
+            and "PROGRAM FIELD EXPERIENCE HOURS" in text):
+        left = [entry("Section", "MAT Business & Marketing Education Courses")]
+        right = [entry("Section", "Program Information")]
+        section = None
+        bullets = []
+        for line in lines:
+            stripped = line.strip()
+            if stripped == "PROGRAM INFORMATION:":
+                section = "info"
+                continue
+            if stripped == "PROGRAM REQUIREMENTS:":
+                if bullets:
+                    right.extend(entry("Note", b) for b in bullets)
+                    bullets = []
+                right.append(entry("Section", "Program Requirements"))
+                section = "requirements"
+                continue
+            if stripped.startswith("ACKNOWLEDGEMENT OF PROGRAM CONTRACT"):
+                section = None
+            if "PROGRAM FIELD EXPERIENCE HOURS:" in stripped:
+                right.append(entry("Note", stripped))
+            match = re.match(r"^\s*(EDU|EDR)\s+(\d{3})\s+(.+?)\s+(\d+)\s+_{2,}", line)
+            if match:
+                left.append(entry("Course",match.group(3).strip(),f"{match.group(1)} {match.group(2)}",int(match.group(4))))
+                continue
+            if section and stripped and (stripped.startswith("•") or (bullets and not re.search(r"^(PROGRAM|COURSE|EDU|EDR)",stripped))):
+                if stripped.startswith("•"):
+                    bullets.append(stripped.lstrip("• ").strip())
+                else:
+                    bullets[-1] += " " + stripped
+        right.extend(entry("Note",b) for b in bullets)
+        if sum(r["Type"] == "Course" for r in left) >= 10:
+            return pd.DataFrame(left,columns=columns), pd.DataFrame(right,columns=columns)
+    return None
+
+
 def layout_rows(pdf_bytes: bytes) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Read each page as two independent visual columns; retain blank elective lines."""
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    graduate = _graduate_stacked_program_rows(doc)
+    if graduate is not None:
+        return graduate
     stacked = _single_column_program_rows(doc)
     if stacked is not None:
         return stacked
@@ -379,6 +454,10 @@ def build_layout_workbook(items: list[tuple[str, pd.DataFrame, pd.DataFrame]]) -
         ws.set_row(0,22);ws.set_row(1,22)
         left_heading = "GENERAL EDUCATION" if (not left.empty and str(left.iloc[0]["Course / Requirement"]).strip().lower() == "general education") else "UNIVERSITY STUDIES"
         right_heading = "MAJOR CLASSES" if (not right.empty and str(right.iloc[0]["Course / Requirement"]).strip().lower() == "major classes") else "MAJOR, SUPPORT & ELECTIVES"
+        if not left.empty and str(left.iloc[0]["Course / Requirement"]).lower().startswith("mat business"):
+            left_heading, right_heading = "MAT COURSE REQUIREMENTS", "PROGRAM INFORMATION & REQUIREMENTS"
+        elif not left.empty and str(left.iloc[0]["Course / Requirement"]).lower() == "generalist year":
+            left_heading, right_heading = "GENERALIST YEAR", "ADVANCED GENERALIST YEAR"
         ws.merge_range("A4:D4",left_heading,banner)
         ws.merge_range("F4:I4",right_heading,banner)
         summaries=[]
