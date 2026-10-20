@@ -68,11 +68,11 @@ def _course_rows(pdf_bytes: bytes) -> list[dict[str, Any]]:
                     continue
                 course = f"{match.group(1)} {match.group(2)}"
                 row = sorted((w for w in words if low <= (w[0]+w[2])/2 < high and abs(w[1]-y) <= 3), key=lambda w:w[0])
-                code_word = next((w for w in row if re.fullmatch(re.escape(match.group(2))+r"[\*†]*",w[4])),None)
+                code_word = next((w for w in row if re.fullmatch(re.escape(match.group(2))+r"[\*†]*",w[4]) or re.fullmatch(re.escape(match.group(1))+re.escape(match.group(2))+r"[\*†]*",w[4])),None)
                 if not code_word:
                     continue
                 code_end = code_word[2]
-                code_start = next((w[0] for w in row if w[4] == match.group(1)), x)
+                code_start = next((w[0] for w in row if w[4] == match.group(1)), code_word[0])
                 if side == "Left":
                     credit_lo, credit_hi = middle-48, middle-6
                 elif code_start < middle+35:
@@ -83,6 +83,13 @@ def _course_rows(pdf_bytes: bytes) -> list[dict[str, Any]]:
                 credits = float(matches[-1][4]) if len(matches)==1 else None
                 title_parts = [w[4] for w in row if w[0] >= code_end-1 and (w[0]+w[2])/2 < credit_lo-3]
                 title = " ".join(title_parts).strip(" -*:†_")
+                # Some PDFs attach academic credit values to the final title word.
+                # Never interpret clinical/contact-hour figures as course credits.
+                if credits is None and not re.search(r"clinical|contact|lab hours", line, re.I):
+                    glued = re.search(r"(?<=[A-Za-z])([1-9])$", title)
+                    if glued:
+                        credits = float(glued.group(1))
+                        title = title[:-1].rstrip()
                 if not title or len(title)>160:
                     continue
                 clinical = None
