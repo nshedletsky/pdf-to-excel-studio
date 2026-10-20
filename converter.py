@@ -272,8 +272,10 @@ def _single_column_program_rows(doc: fitz.Document) -> tuple[pd.DataFrame, pd.Da
             title = title[:credit_match.start()].strip()
         is_alternative = pending_alternative and code.startswith("MATH ")
         if is_alternative:
-            # The preceding MATH course owns the three-credit slot.
-            # Keep this choice visible and editable, but never double-count it.
+            # In this sheet the shared credit value is printed beside the SECOND
+            # option. Apply it to the requirement represented by the first one.
+            if active and active[-1]["Type"] == "Course" and active[-1]["Credits"] is None:
+                active[-1]["Credits"] = credits
             active.append({"Type": "Note", "Code": code, "Course / Requirement": "OR " + title + " (alternative to previous course)", "Credits": None, "Page": 1})
         else:
             active.append({"Type": "Elective / blank" if blank_rs else "Course", "Code": code, "Course / Requirement": title, "Credits": credits, "Page": 1})
