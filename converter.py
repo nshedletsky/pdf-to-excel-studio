@@ -228,9 +228,68 @@ def build_workbook(items: list[tuple[str,pd.DataFrame,str]], add_totals: bool=Tr
 LAYOUT_CODE_RE = re.compile(r"\b([A-Z]{2,5})\s*(\d{3}[A-Z]?)\b")
 SECTION_HINT_RE = re.compile(r"(\(\s*\d+\s*(?:credit\s*)?hours?\s*\)|university studies|business major|general electives|support courses|concentration|humanities|communication|social sciences|natural sciences|religious studies|major courses|prerequisites|term \d+)", re.I)
 
+def _single_column_program_rows(doc: fitz.Document) -> tuple[pd.DataFrame, pd.DataFrame] | None:
+    """Handle a stacked General Education / Major Classes PDF with credits in a narrow right-hand column.
+
+    Only activate when the PDF clearly contains these two sections and no second course-list column.
+    Preserve alternative courses as notes so their shared credits aren't counted twice.
+    """
+    if len(doc) != 1:
+        return None
+    page = doc[0]
+    words = page.get_text("words")
+    all_text = page.get_text()
+    if not (re.search(r"(?im)^General Education\\s*$", all_text)
+            and re.search(r"(?im)^Major Classes\\s*$", all_text)):
+        return None
+    # Other program sheets have full course descriptions on the right.
+    if any(w[4].isalpha() and (w[0]+w[2])/2 > page.rect.width * .60 for w in words):
+        return None
+    left, right = [], []
+    active = None
+    pending_alternative = False
+    for _, _, line in _lines_in_column(words, 0, page.rect.width + 1):
+        if line == "General Education":
+            active = left
+            active.append({"Type": "Section", "Code": "", "Course / Requirement": line, "Credits": None, "Page": 1})
+            continue
+        if line == "Major Classes":
+            active = right
+            active.append({"Type": "Section", "Code": "", "Course / Requirement": line, "Credits": None, "Page": 1})
+            continue
+        if active is None or re.search(r"(?:General Education|Major Classes|Program) Total", line, re.I):
+            continue
+        match = LAYOUT_CODE_RE.match(line)
+        blank_rs = re.match(r"^(RS)\\s+-{2,}", line)
+        if not match and not blank_rs:
+            active.append({"Type": "Note", "Code": "", "Course / Requirement": line, "Credits": None, "Page": 1})
+            continue
+        code = f"{match.group(1)} {match.group(2)}" if match else ""
+        title = line[match.end():].strip(" -") if match else "Religious Studies course (to be selected)"
+        credit_match = re.search(r"\\s+([1-9]|1[0-2])\\s*$", title)
+        credits = int(credit_match.group(1)) if credit_match else None
+        if credit_match:
+            title = title[:credit_match.start()].strip()
+        is_alternative = pending_alternative and code.startswith("MATH ")
+        if is_alternative:
+            # The preceding MATH course owns the three-credit slot.
+            # Keep this choice visible and editable, but never double-count it.
+            active.append({"Type": "Note", "Code": code, "Course / Requirement": "OR " + title + " (alternative to previous course)", "Credits": None, "Page": 1})
+        else:
+            active.append({"Type": "Elective / blank" if blank_rs else "Course", "Code": code, "Course / Requirement": title, "Credits": credits, "Page": 1})
+        pending_alternative = title.endswith(" OR") and not is_alternative
+        if pending_alternative:
+            active[-1]["Course / Requirement"] = title[:-3].rstrip() + " (choose one of the two mathematics courses)"
+    columns = ["Type", "Code", "Course / Requirement", "Credits", "Page"]
+    return pd.DataFrame(left, columns=columns), pd.DataFrame(right, columns=columns)
+
+
 def layout_rows(pdf_bytes: bytes) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Read each page as two independent visual columns; retain blank elective lines."""
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    stacked = _single_column_program_rows(doc)
+    if stacked is not None:
+        return stacked
     halves = [[], []]
     for pageno, page in enumerate(doc, 1):
         midpoint = page.rect.width / 2
@@ -316,8 +375,10 @@ def build_layout_workbook(items: list[tuple[str, pd.DataFrame, pd.DataFrame]]) -
         ws.set_column("F:F",3);ws.set_column("G:G",10);ws.set_column("H:H",35);ws.set_column("I:I",7)
         ws.merge_range("A1:I2",Path(filename).stem.replace("_"," ")+" | Editable Program Sheet",navy)
         ws.set_row(0,22);ws.set_row(1,22)
-        ws.merge_range("A4:D4","UNIVERSITY STUDIES",banner)
-        ws.merge_range("F4:I4","MAJOR, SUPPORT & ELECTIVES",banner)
+        left_heading = "GENERAL EDUCATION" if (not left.empty and str(left.iloc[0]["Course / Requirement"]).strip().lower() == "general education") else "UNIVERSITY STUDIES"
+        right_heading = "MAJOR CLASSES" if (not right.empty and str(right.iloc[0]["Course / Requirement"]).strip().lower() == "major classes") else "MAJOR, SUPPORT & ELECTIVES"
+        ws.merge_range("A4:D4",left_heading,banner)
+        ws.merge_range("F4:I4",right_heading,banner)
         summaries=[]
         ends=[]
         side_values=[]
