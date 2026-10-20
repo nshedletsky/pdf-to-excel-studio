@@ -295,22 +295,18 @@ def build_layout_workbook(items: list[tuple[str, pd.DataFrame, pd.DataFrame]]) -
             continue
         ws=book.add_worksheet(safe_sheet_name(filename,used))
         ws.hide_gridlines(2)
-        ws.set_column("A:A",4);ws.set_column("B:B",12);ws.set_column("C:C",40)
-        ws.set_column("D:D",9);ws.set_column("E:E",3)
-        ws.set_column("F:F",4);ws.set_column("G:G",12);ws.set_column("H:H",40);ws.set_column("I:I",9)
-        ws.merge_range("A1:I2","PROGRAM SHEET  |  EDITABLE CURRICULUM",navy)
-        ws.merge_range("A3:I3",Path(filename).stem.replace("_"," "),section)
-        ws.merge_range("A5:D5","Student Name: _______________________________",normal)
-        ws.merge_range("F5:I5","Student ID: ________________________________",normal)
-        ws.merge_range("A6:D6","Catalog Year: _______________________________",normal)
-        ws.merge_range("F6:I6","Advisor: ___________________________________",normal)
-        ws.merge_range("A8:D8","UNIVERSITY STUDIES / LEFT SIDE",banner)
-        ws.merge_range("F8:I8","MAJOR, SUPPORT & ELECTIVES / RIGHT SIDE",banner)
+        ws.set_column("A:A",3);ws.set_column("B:B",10);ws.set_column("C:C",35)
+        ws.set_column("D:D",7);ws.set_column("E:E",2)
+        ws.set_column("F:F",3);ws.set_column("G:G",10);ws.set_column("H:H",35);ws.set_column("I:I",7)
+        ws.merge_range("A1:I2",Path(filename).stem.replace("_"," ")+" | Editable Program Sheet",navy)
+        ws.set_row(0,22);ws.set_row(1,22)
+        ws.merge_range("A4:D4","UNIVERSITY STUDIES",banner)
+        ws.merge_range("F4:I4","MAJOR, SUPPORT & ELECTIVES",banner)
         summaries=[]
         ends=[]
         for data, cols in ((left,("A","B","C","D")),(right,("F","G","H","I"))):
             flag,code,title,hours=cols
-            row=9
+            row=5
             start=None
             groups=[]
             for idx,(_, item) in enumerate(data.reset_index(drop=True).iterrows()):
@@ -319,12 +315,12 @@ def build_layout_workbook(items: list[tuple[str, pd.DataFrame, pd.DataFrame]]) -
                 number=item["Credits"]
                 if kind=="Section":
                     if start is not None:
-                        ws.write(row-1,2 if flag=="A" else 7,"Section subtotal",subtotal)
-                        ws.write_formula(row-1,3 if flag=="A" else 8,f"=SUM({hours}{start}:{hours}{row-1})",subtotal)
+                        ws.write(f"{title}{row}","Section subtotal",subtotal)
+                        ws.write_formula(f"{hours}{row}",f"=SUM({hours}{start}:{hours}{row-1})",subtotal)
                         groups.append(row)
                         row+=2
                     ws.merge_range(f"{flag}{row}:{hours}{row}",label,section)
-                    ws.set_row(row-1,25)
+                    ws.set_row(row-1,22)
                     row+=1
                     start=row+1
                     continue
@@ -336,13 +332,13 @@ def build_layout_workbook(items: list[tuple[str, pd.DataFrame, pd.DataFrame]]) -
                     ws.write_number(f"{hours}{row}",float(number),credit)
                 else:
                     ws.write_blank(f"{hours}{row}",None,credit)
-                ws.set_row(row-1,27 if len(label)<55 else 40)
+                ws.set_row(row-1,20 if len(label)<55 else 30)
                 if start is None: start=row
                 row+=1
             if start is not None:
-                subtotal_row = row + 1
+                subtotal_row = row
                 ws.write(f"{title}{subtotal_row}","Section subtotal",subtotal)
-                ws.write_formula(f"{hours}{subtotal_row}",f"=SUM({hours}{start}:{hours}{row})",subtotal)
+                ws.write_formula(f"{hours}{subtotal_row}",f"=SUM({hours}{start}:{hours}{row-1})",subtotal)
                 groups.append(subtotal_row)
                 row+=2
             ends.append(row)
@@ -356,9 +352,9 @@ def build_layout_workbook(items: list[tuple[str, pd.DataFrame, pd.DataFrame]]) -
         ws.merge_range(f"F{bottom+2}:H{bottom+2}","COMBINED EXTRACTED CREDITS",section)
         ws.write_formula(f"I{bottom+2}",f"=D{bottom}+I{bottom}",subtotal)
         ws.merge_range(f"A{bottom+4}:I{bottom+5}","REVIEW BEFORE APPROVAL: Blank requirements, reused courses, OCR/layout ambiguities and electives may affect totals. Compare against the source PDF. These totals are not an official degree audit.",caution)
-        ws.freeze_panes(8,0)
-        ws.set_landscape();ws.set_paper(9);ws.fit_to_pages(1,0)
-        ws.set_margins(.25,.25,.4,.4)
+        ws.freeze_panes(4,0)
+        ws.set_landscape();ws.set_paper(5);ws.fit_to_pages(1,0)
+        ws.set_margins(.2,.2,.3,.3)
         ws.print_area(0,0,bottom+4,8)
         ws.center_horizontally()
         ws.set_footer("&CPage &P of &N")
