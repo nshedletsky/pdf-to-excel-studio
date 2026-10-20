@@ -9,8 +9,16 @@ st.title("PDF to Excel")
 st.write("Upload multiple PDFs and get one editable Excel workbook, with one worksheet per PDF.")
 st.caption("Prototype: works best with selectable-text PDFs. Scanned/image-only PDFs are not supported yet.")
 
-format_choice=st.radio("Excel layout",["Editable two-column program sheet","Extracted data table"],horizontal=True)
-st.caption("The two-column layout keeps the left and right sides separate, including blank requirements and notes.")
+format_choice=st.radio(
+    "How would you like your Excel file organized?",
+    ["Keep the document layout", "Make a simple data table"],
+    captions=[
+        "Best for editing and reprinting a program sheet. Keeps University Studies on the left, major courses and electives on the right.",
+        "Best for sorting, filtering, or analyzing information. Places extracted rows in a regular spreadsheet, not a printable program-sheet layout."
+    ],
+    index=0,
+    horizontal=False,
+)
 files=st.file_uploader("Upload PDF files",type=["pdf"],accept_multiple_files=True)
 totals=st.checkbox("Add automatic totals where appropriate",value=True,help="For safety, automatic formulas are added only to Credits columns detected in program sheets. Other numeric fields aren't assumed additive.")
 st.info("Clean spreadsheet styling, filters, frozen headings, and worksheet tabs are always enabled.")
@@ -30,7 +38,7 @@ if files:
                 continue
             try:
                 signature=hashlib.sha256(raw).hexdigest()
-                if format_choice=="Editable two-column program sheet":
+                if format_choice=="Keep the document layout":
                     layout_key=f"layout_{signature}"
                     if layout_key not in st.session_state:
                         st.session_state[layout_key]=layout_rows(raw)
@@ -67,7 +75,7 @@ if files:
     if items:
         try:
             workbook=build_workbook(items,add_totals=totals)
-            st.download_button("Download Excel workbook",data=workbook,file_name="converted_pdfs.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",type="primary")
+            st.download_button("Download data table workbook",data=workbook,file_name="pdf_data_tables.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",type="primary")
             st.caption("Files are processed in this app session. This prototype has no database, user accounts, or remote AI calls. If deployed online, the server still receives your uploads.")
         except Exception as ex:
             st.error(f"Could not create workbook: {ex}")
