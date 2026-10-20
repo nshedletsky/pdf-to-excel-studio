@@ -60,6 +60,16 @@ if files:
                     if layout_key not in st.session_state:
                         st.session_state[layout_key]=layout_rows(raw)
                     left,right=st.session_state[layout_key]
+                    if left.empty and right.empty:
+                        # Academic level does not determine PDF structure. If the
+                        # two-column reader found nothing, try stacked extraction.
+                        fallback_key=f"stacked_{signature}"
+                        if fallback_key not in st.session_state:
+                            st.session_state[fallback_key]=graduate_rows(raw)
+                        st.info("This PDF uses a stacked course layout, so it will be converted to an editable vertical program sheet instead.")
+                        stacked_edit=st.data_editor(st.session_state[fallback_key],key=f"stacked_editor_{signature}",num_rows="dynamic",hide_index=True,use_container_width=True)
+                        grad_items.append((up.name,stacked_edit))
+                        continue
                     st.caption("Edit either side below. Course/requirement and credit fields are editable, including blank electives. Choose Section in the Type column to create a section heading.")
                     col_left,col_right=st.columns(2)
                     with col_left:
