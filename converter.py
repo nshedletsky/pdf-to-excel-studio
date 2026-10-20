@@ -47,50 +47,50 @@ def _lines_in_column(words: list[tuple], x_min: float, x_max: float) -> list[tup
 
 
 def _course_rows(pdf_bytes: bytes) -> list[dict[str, Any]]:
-    """Extract course entries by their visual columns, never from trailing numbers."""
+    """Identify courses visually, using credit columns rather than trailing text numbers."""
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    result: list[dict[str, Any]] = []
-    for page_idx, page in enumerate(doc, 1):
+    result = []
+    for page_no, page in enumerate(doc, 1):
         words = page.get_text("words")
-        mid = page.rect.width / 2
-        for side, lo, hi in (("Left", 0, mid-5), ("Right", mid-5, page.rect.width+1)):
-            lines = _lines_in_column(words, lo, hi)
-            section = "Uncategorized"
-            for y, x, line in lines:
-                m = re.match(r"^\s*(?:[_•☐✓]+\s*)?([A-Z]{2,5})\s*[- ]?\s*(\d{3}[A-Z]?)(?:[\*†]*)\b", line)
-                if not m:
-                    if line and len(line) < 92 and not re.search(r"student (name|id)|phone|email|mailing|entry date", line, re.I):
-                        if re.search(r"(\b(?:major|core|concentration|electives|social sciences|humanities|religious studies|communication|natural sciences|prerequisites|term [1-9])\b)",line,re.I):
-                            section = line
+        middle = page.rect.width / 2
+        for side, low, high in (("Left", 0, middle), ("Right", middle, page.rect.width + 1)):
+            section = "General"
+            for y, x, line in _lines_in_column(words, low, high):
+                # Course codes can be preceded by completion checkboxes/underscores.
+                match = COURSE_RE.search(line)
+                if not match:
+                    if len(line) < 90 and re.search(r"\b(major|core|finance|concentration|electives|studies|communications?|humanities|social sciences|mathematics|prerequisites|term [1-9])\b",line,re.I):
+                        section = line
                     continue
-                code=f"{m.group(1)} {m.group(2)}"
-                row_words=[w for w in words if lo <= (w[0]+w[2])/2 < hi and abs(w[1]-y)<=3.0]
-                row_words.sort(key=lambda w:w[0])
-                start_x=next((w[0] for w in row_words if w[4]==m.group(1)), x)
-                if side=="Left":
-                    credit_band=(hi-33,hi-4)
-                elif start_x >= mid+30:
-                    credit_band=(page.rect.width-52,page.rect.width-25)
+                # Avoid references to a course embedded in a paragraph/footnote.
+                before = line[:match.start()].strip()
+                if len(before) > 28 or any(c.isalpha() for c in before.replace("_", "")):
+                    continue
+                course = f"{match.group(1)} {match.group(2)}"
+                row = sorted((w for w in words if low <= (w[0]+w[2])/2 < high and abs(w[1]-y) <= 3), key=lambda w:w[0])
+                code_word = next((w for w in row if re.fullmatch(re.escape(match.group(2))+r"[\*†]*",w[4])),None)
+                if not code_word:
+                    continue
+                code_end = code_word[2]
+                code_start = next((w[0] for w in row if w[4] == match.group(1)), x)
+                if side == "Left":
+                    credit_lo, credit_hi = middle-48, middle-6
+                elif code_start < middle+35:
+                    credit_lo, credit_hi = middle+145, middle+200
                 else:
-                    credit_band=(mid+165,mid+187)
-                candidate=[]
-                for w in row_words:
-                    center=(w[0]+w[2])/2
-                    t=w[4].strip()
-                    if credit_band[0] <= center <= credit_band[1] and re.fullmatch(r"(?:[1-9]|1[0-2])(?:\.5)?", t):
-                        candidate.append((center,float(t)))
-                credit=candidate[-1][1] if len(candidate)==1 else None
-                code_end=next((w[2] for w in row_words if re.match(r"^"+re.escape(m.group(2))+r"[\*†]*$",w[4])),start_x+45)
-                title_words=[w[4] for w in row_words if w[0]>=code_end-1 and (w[0]+w[2])/2 < credit_band[0]-3]
-                title=" ".join(title_words).strip(" -*:†")
+                    credit_lo, credit_hi = page.rect.width-65, page.rect.width-25
+                matches = [w for w in row if credit_lo <= (w[0]+w[2])/2 <= credit_hi and re.fullmatch(r"(?:[1-9]|1[0-2])(?:\.5)?",w[4])]
+                credits = float(matches[-1][4]) if len(matches)==1 else None
+                title_parts = [w[4] for w in row if w[0] >= code_end-1 and (w[0]+w[2])/2 < credit_lo-3]
+                title = " ".join(title_parts).strip(" -*:†_")
                 if not title or len(title)>160:
                     continue
-                clinical=None
-                if side=="Right":
-                    far=[(w[0],w[4]) for w in row_words if w[0]>=page.rect.width-58 and re.fullmatch(r"\d+(?:\.\d+)?",w[4])]
-                    if section.lower().startswith("term ") and far:
-                        clinical=float(far[-1][1])
-                result.append({"Page":page_idx,"Section":section,"Course":code,"Title":title,"Credits":credit,"Clinical Hours":clinical,"Source side":side})
+                clinical = None
+                if side == "Right" and code_start < middle+35:
+                    hours = [float(w[4]) for w in row if (w[0]+w[2])/2 > middle+230 and re.fullmatch(r"\d+(?:\.\d+)?",w[4])]
+                    if hours:
+                        clinical=hours[-1]
+                result.append({"Page":page_no,"Section":section,"Course":course,"Title":title,"Credits":credits,"Clinical Hours":clinical,"Source side":side})
     return result
 
 
