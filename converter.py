@@ -340,9 +340,10 @@ def build_layout_workbook(items: list[tuple[str, pd.DataFrame, pd.DataFrame]]) -
                 if start is None: start=row
                 row+=1
             if start is not None:
-                ws.write(f"{title}{row}","Section subtotal",subtotal)
-                ws.write_formula(f"{hours}{row}",f"=SUM({hours}{start}:{hours}{row-1})",subtotal)
-                groups.append(row)
+                subtotal_row = row + 1
+                ws.write(f"{title}{subtotal_row}","Section subtotal",subtotal)
+                ws.write_formula(f"{hours}{subtotal_row}",f"=SUM({hours}{start}:{hours}{row})",subtotal)
+                groups.append(subtotal_row)
                 row+=2
             ends.append(row)
             summaries.append((cols,groups))
@@ -356,7 +357,7 @@ def build_layout_workbook(items: list[tuple[str, pd.DataFrame, pd.DataFrame]]) -
         ws.write_formula(f"I{bottom+2}",f"=D{bottom}+I{bottom}",subtotal)
         ws.merge_range(f"A{bottom+4}:I{bottom+5}","REVIEW BEFORE APPROVAL: Blank requirements, reused courses, OCR/layout ambiguities and electives may affect totals. Compare against the source PDF. These totals are not an official degree audit.",caution)
         ws.freeze_panes(8,0)
-        ws.set_landscape();ws.set_paper(9);ws.fit_to_pages(1,1)
+        ws.set_landscape();ws.set_paper(9);ws.fit_to_pages(1,0)
         ws.set_margins(.25,.25,.4,.4)
         ws.print_area(0,0,bottom+4,8)
         ws.center_horizontally()
