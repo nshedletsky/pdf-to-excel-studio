@@ -323,22 +323,22 @@ def build_layout_workbook(items: list[tuple[str, pd.DataFrame, pd.DataFrame]]) -
         for data, cols in ((left,("A","B","C","D")),(right,("F","G","H","I"))):
             flag,code,title,hours=cols
             row=5
-            start=None
+            credit_cells=[]
             groups=[]
             for idx,(_, item) in enumerate(data.reset_index(drop=True).iterrows()):
                 kind=str(item["Type"])
                 label=str(item["Course / Requirement"] if pd.notna(item["Course / Requirement"]) else "")
                 number=item["Credits"]
                 if kind=="Section":
-                    if start is not None:
+                    if credit_cells:
                         ws.write(f"{title}{row}","Section subtotal",subtotal)
-                        ws.write_formula(f"{hours}{row}",f"=SUM({hours}{start}:{hours}{row-1})",subtotal)
+                        ws.write_formula(f"{hours}{row}","=SUM("+",".join(credit_cells)+")",subtotal)
                         groups.append(row)
                         row+=2
+                    credit_cells=[]
                     ws.merge_range(f"{flag}{row}:{hours}{row}",label,section)
                     ws.set_row(row-1,22)
                     row+=1
-                    start=row+1
                     continue
                 usefmt=striped if idx%2 else normal
                 ws.write_string(f"{flag}{row}","☐" if kind in ("Course","Elective / blank") else "",usefmt)
@@ -346,15 +346,15 @@ def build_layout_workbook(items: list[tuple[str, pd.DataFrame, pd.DataFrame]]) -
                 ws.write_string(f"{title}{row}",label,usefmt)
                 if number is not None and not pd.isna(number):
                     ws.write_number(f"{hours}{row}",float(number),credit)
+                    credit_cells.append(f"{hours}{row}")
                 else:
                     ws.write_blank(f"{hours}{row}",None,credit)
                 ws.set_row(row-1,20 if len(label)<55 else 30)
-                if start is None: start=row
                 row+=1
-            if start is not None:
+            if credit_cells:
                 subtotal_row = row
                 ws.write(f"{title}{subtotal_row}","Section subtotal",subtotal)
-                ws.write_formula(f"{hours}{subtotal_row}",f"=SUM({hours}{start}:{hours}{row-1})",subtotal)
+                ws.write_formula(f"{hours}{subtotal_row}","=SUM("+",".join(credit_cells)+")",subtotal)
                 groups.append(subtotal_row)
                 row+=2
             ends.append(row)
