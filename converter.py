@@ -531,3 +531,132 @@ def build_layout_workbook(items: list[tuple[str, pd.DataFrame, pd.DataFrame]]) -
         ws.set_footer("&CPage &P of &N")
     book.close()
     return buf.getvalue()
+
+
+def graduate_rows(pdf_bytes: bytes) -> pd.DataFrame:
+    """Read stacked graduate curricula and preserve descriptive notes."""
+    doc=fitz.open(stream=pdf_bytes,filetype="pdf")
+    fields=["Type","Code","Course / Requirement","Credits","Page"]
+    records=[]
+    in_curriculum=False
+    after_curriculum=False
+    last_course=None
+    course_rx=re.compile(r"^\s*([A-Z]{2,5})\s*[- ]?\s*(\d{3}[A-Z]?)\s*:?\s*[-–]?\s*(.+?)\s*$")
+    for page_number,page in enumerate(doc,1):
+        for raw in page.get_text(sort=True).splitlines():
+            line=raw.strip()
+            if not line:
+                continue
+            is_header=bool(re.search(r"\(\s*\d+\s*(?:credit\s*)?hours?\s*\)",line,re.I) and not course_rx.match(line))
+            is_year=bool(re.match(r"^(?:I{1,3}\.\s*)?(GENERALIST YEAR|ADVANCED GENERALIST YEAR)\b",line,re.I))
+            if is_header or is_year or re.match(r"^PROGRAM REQUIREMENTS:",line,re.I):
+                records.append({"Type":"Section","Code":"","Course / Requirement":line,"Credits":None,"Page":page_number})
+                in_curriculum=True
+                after_curriculum=False
+                last_course=None
+                continue
+            if re.search(r"^(?:Course\s*#|COURSE NUMBER|COURSE TITLE/|Name of Course)",line,re.I):
+                in_curriculum=True
+                continue
+            if re.match(r"^(?:ACKNOWLEDGEMENT OF|COMPLETION OF PROGRAM|Total Credit Hours\b)",line,re.I):
+                in_curriculum=False
+                after_curriculum=True
+            course=course_rx.match(line)
+            if course and in_curriculum and not after_curriculum:
+                rest=re.sub(r"\s+_{2,}.*$","",course.group(3)).strip()
+                credit_match=re.search(r"\s+([1-9]|1[0-2])\s*$",rest)
+                credits=int(credit_match.group(1)) if credit_match else None
+                title=rest[:credit_match.start()].strip() if credit_match else rest
+                records.append({"Type":"Course","Code":f"{course.group(1)} {course.group(2)}","Course / Requirement":title,"Credits":credits,"Page":page_number})
+                last_course=len(records)-1
+                continue
+            elective=re.match(r"^ELECTIVE Courses\b.*?\b([1-9]|1[0-2])\s*(?:_{2,})?$",line,re.I)
+            if elective and in_curriculum:
+                records.append({"Type":"Elective / blank","Code":"","Course / Requirement":"Elective course","Credits":int(elective.group(1)),"Page":page_number})
+                last_course=None
+                continue
+            if last_course is not None and in_curriculum and (raw.startswith(" "*12) or raw.startswith("\t")):
+                records[last_course]["Course / Requirement"]+=" "+line
+                continue
+            if in_curriculum or after_curriculum or line.startswith(("*","†","•")) or re.match(r"^(?:PROGRAM INFORMATION:|PROGRAM FIELD EXPERIENCE HOURS:)",line,re.I):
+                records.append({"Type":"Note","Code":"","Course / Requirement":line,"Credits":None,"Page":page_number})
+                last_course=None
+    frame=pd.DataFrame(records,columns=fields)
+    if frame.empty or not frame["Type"].eq("Course").any():
+        raise ValueError("No graduate courses could be recognized. Please send this PDF for review.")
+    return frame
+
+
+def build_graduate_workbook(items: list[tuple[str,pd.DataFrame]]) -> bytes:
+    """Create vertically stacked graduate program sheets with editable credits and totals."""
+    buf=io.BytesIO()
+    wb=xlsxwriter.Workbook(buf,{"in_memory":True,"strings_to_formulas":False,"strings_to_urls":False})
+    names=set()
+    heading=wb.add_format({"bold":True,"font_color":"white","bg_color":"#17324D","font_size":14})
+    section=wb.add_format({"bold":True,"font_color":"#17324D","bg_color":"#DDEBF5","text_wrap":True})
+    textfmt=wb.add_format({"text_wrap":True,"valign":"top"})
+    creditsfmt=wb.add_format({"num_format":"0.##","bg_color":"#E9F5EC"})
+    subt=wb.add_format({"bold":True,"bg_color":"#EEF2F7"})
+    note=wb.add_format({"italic":True,"text_wrap":True,"font_color":"#555555"})
+    for filename,data in items:
+        if data.empty:
+            continue
+        ws=wb.add_worksheet(safe_sheet_name(filename,names))
+        ws.hide_gridlines(2)
+        ws.set_column("A:A",13)
+        ws.set_column("B:B",72)
+        ws.set_column("C:C",12)
+        ws.merge_range("A1:C2",Path(filename).stem.replace("_"," ")+" | Graduate Program Sheet",heading)
+        ws.write_row("A4",["Course","Course / Requirement","Credits"],section)
+        row=5
+        section_credits=[]
+        cached=0.0
+        groups=[]
+        def finish_section(row,cells,value):
+            if not cells:
+                return row
+            ws.write(f"B{row}","Section subtotal",subt)
+            ws.write_formula(f"C{row}","=SUM("+",".join(cells)+")",subt,value)
+            groups.append(f"C{row}")
+            return row+2
+        for _,item in data.iterrows():
+            kind=str(item["Type"])
+            label=str(item["Course / Requirement"]) if pd.notna(item["Course / Requirement"]) else ""
+            if kind=="Section":
+                row=finish_section(row,section_credits,cached)
+                section_credits=[]
+                cached=0
+                ws.merge_range(f"A{row}:C{row}",label,section)
+                ws.set_row(row-1,24)
+                row+=1
+                continue
+            if kind=="Note":
+                ws.merge_range(f"A{row}:C{row}",label,note)
+                ws.set_row(row-1,min(90,24*(len(label)//85+1)))
+                row+=1
+                continue
+            ws.write_string(f"A{row}",str(item["Code"]) if pd.notna(item["Code"]) else "",textfmt)
+            ws.write_string(f"B{row}",label,textfmt)
+            if pd.notna(item["Credits"]) and str(item["Credits"]).strip():
+                try:
+                    amount=float(item["Credits"])
+                    ws.write_number(f"C{row}",amount,creditsfmt)
+                    section_credits.append(f"C{row}")
+                    cached+=amount
+                except (TypeError,ValueError):
+                    ws.write_string(f"C{row}",str(item["Credits"]),creditsfmt)
+            else:
+                ws.write_blank(f"C{row}",None,creditsfmt)
+            ws.set_row(row-1,min(75,22*(len(label)//75+1)))
+            row+=1
+        row=finish_section(row,section_credits,cached)
+        ws.merge_range(f"A{row}:B{row}","TOTAL EXTRACTED CREDIT HOURS",heading)
+        ws.write_formula(f"C{row}","=SUM("+",".join(groups)+")" if groups else "=0",subt)
+        ws.freeze_panes(4,0)
+        ws.set_portrait()
+        ws.fit_to_pages(1,0)
+        ws.set_margins(.25,.25,.4,.4)
+        ws.print_area(0,0,row-1,2)
+        ws.set_footer("&CPage &P of &N")
+    wb.close()
+    return buf.getvalue()
