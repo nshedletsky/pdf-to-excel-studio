@@ -547,6 +547,10 @@ def graduate_rows(pdf_bytes: bytes) -> pd.DataFrame:
             line=raw.strip()
             if not line:
                 continue
+            if re.match(r"^(?:\*+courses are analyzed|†\s*prerequisites|\*+prerequisites)",line,re.I):
+                in_curriculum=False
+                after_curriculum=True
+                last_course=None
             is_header=bool(re.search(r"\(\s*\d+\s*(?:credit\s*)?hours?\s*\)",line,re.I) and not course_rx.match(line))
             is_year=bool(re.match(r"^(?:I{1,3}\.\s*)?(GENERALIST YEAR|ADVANCED GENERALIST YEAR)\b",line,re.I))
             if is_header or is_year or re.match(r"^PROGRAM REQUIREMENTS:",line,re.I):
