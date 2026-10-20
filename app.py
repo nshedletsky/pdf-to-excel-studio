@@ -9,28 +9,21 @@ st.title("PDF to Excel for Jane")
 st.write("Upload multiple PDFs and get one editable Excel workbook, with one worksheet per PDF.")
 st.caption("Prototype: works best with selectable-text PDFs. Scanned/image-only PDFs are not supported yet.")
 
-program_type=st.radio('Program type', ['Undergraduate', 'Graduate'], horizontal=True)
-if program_type=='Undergraduate':
-    st.caption('Converts existing PDF program sheets to a standardized two-column Excel layout. A future approved University Studies template can replace the left side.')
-else:
-    st.caption('Converts graduate program sheets into editable Excel with vertically stacked sections and notes. Different degree totals are preserved.')
-
-if program_type=='Undergraduate':
-    format_choice=st.radio(
-    "How would you like your Excel file organized?",
-    ["Keep the document layout", "Make a simple data table"],
+layout_choice=st.radio(
+    "How should your Excel program sheet be organized?",
+    ["Automatically choose the layout", "Two columns (side by side)", "Stacked sections (top to bottom)", "Simple data table"],
     captions=[
-        "Best for editing and reprinting a program sheet. Keeps University Studies on the left, major courses and electives on the right.",
-        "Best for sorting, filtering, or analyzing information. Places extracted rows in a regular spreadsheet, not a printable program-sheet layout."
+        "Recommended. Uses the two-column format when recognized, otherwise tries stacked course sections.",
+        "Use for program sheets with general education on the left and major requirements on the right.",
+        "Use for program sheets with course sections listed vertically, regardless of academic level.",
+        "Extract courses into a sortable spreadsheet rather than a formatted program sheet."
     ],
     index=0,
-    horizontal=False,
-    )
-else:
-    format_choice='Keep the document layout'
+)
+st.caption("You can use any layout for undergraduate, graduate, or combined programs.")
 files=st.file_uploader("Upload PDF files",type=["pdf"],accept_multiple_files=True)
-totals=st.checkbox("Add automatic totals where appropriate",value=True,help="will change.")
-st.info(" spreadsheet styling, filters, frozen headings, and worksheet tabs are always enabled.")
+totals=st.checkbox("Add automatic totals to simple data tables where appropriate",value=True)
+st.caption("Review extracted courses and credits against the original PDF before publishing.")
 
 if files:
     if len(files)>15:
@@ -48,27 +41,30 @@ if files:
                 continue
             try:
                 signature=hashlib.sha256(raw).hexdigest()
-                if program_type=='Graduate':
+                if layout_choice=='Stacked sections (top to bottom)':
                     key=f'grad_{signature}'
                     if key not in st.session_state:
                         st.session_state[key]=graduate_rows(raw)
                     graduate=st.data_editor(st.session_state[key], key=f'grad_editor_{signature}', num_rows='dynamic', hide_index=True, use_container_width=True)
                     grad_items.append((up.name,graduate))
                     continue
-                if format_choice=="Keep the document layout":
+                if layout_choice in ("Automatically choose the layout", "Two columns (side by side)"):
                     layout_key=f"layout_{signature}"
                     if layout_key not in st.session_state:
                         st.session_state[layout_key]=layout_rows(raw)
                     left,right=st.session_state[layout_key]
-                    if left.empty and right.empty:
+                    if left.empty and right.empty and layout_choice=="Automatically choose the layout":
                         # Academic level does not determine PDF structure. If the
                         # two-column reader found nothing, try stacked extraction.
                         fallback_key=f"stacked_{signature}"
                         if fallback_key not in st.session_state:
                             st.session_state[fallback_key]=graduate_rows(raw)
-                        st.info("This PDF uses a stacked course layout, so it will be converted to an editable vertical program sheet instead.")
+                        st.info("A stacked course layout was detected; this file will use a vertical program sheet.")
                         stacked_edit=st.data_editor(st.session_state[fallback_key],key=f"stacked_editor_{signature}",num_rows="dynamic",hide_index=True,use_container_width=True)
                         grad_items.append((up.name,stacked_edit))
+                        continue
+                    if left.empty and right.empty:
+                        st.warning("No two-column requirements were recognized. Try Automatic or Stacked sections.")
                         continue
                     st.caption("Edit either side below. Course/requirement and credit fields are editable, including blank electives. Choose Section in the Type column to create a section heading.")
                     col_left,col_right=st.columns(2)
