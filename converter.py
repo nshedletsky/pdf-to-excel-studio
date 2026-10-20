@@ -320,11 +320,14 @@ def build_layout_workbook(items: list[tuple[str, pd.DataFrame, pd.DataFrame]]) -
         ws.merge_range("F4:I4","MAJOR, SUPPORT & ELECTIVES",banner)
         summaries=[]
         ends=[]
+        side_values=[]
         for data, cols in ((left,("A","B","C","D")),(right,("F","G","H","I"))):
             flag,code,title,hours=cols
             row=5
             credit_cells=[]
+            credit_values=[]
             groups=[]
+            group_values=[]
             for idx,(_, item) in enumerate(data.reset_index(drop=True).iterrows()):
                 kind=str(item["Type"])
                 label=str(item["Course / Requirement"] if pd.notna(item["Course / Requirement"]) else "")
@@ -332,10 +335,12 @@ def build_layout_workbook(items: list[tuple[str, pd.DataFrame, pd.DataFrame]]) -
                 if kind=="Section":
                     if credit_cells:
                         ws.write(f"{title}{row}","Section subtotal",subtotal)
-                        ws.write_formula(f"{hours}{row}","=SUM("+",".join(credit_cells)+")",subtotal)
+                        ws.write_formula(f"{hours}{row}","=SUM("+",".join(credit_cells)+")",subtotal,sum(credit_values))
                         groups.append(row)
+                        group_values.append(sum(credit_values))
                         row+=2
                     credit_cells=[]
+                    credit_values=[]
                     ws.merge_range(f"{flag}{row}:{hours}{row}",label,section)
                     ws.set_row(row-1,22)
                     row+=1
@@ -347,6 +352,7 @@ def build_layout_workbook(items: list[tuple[str, pd.DataFrame, pd.DataFrame]]) -
                 if number is not None and not pd.isna(number):
                     ws.write_number(f"{hours}{row}",float(number),credit)
                     credit_cells.append(f"{hours}{row}")
+                    credit_values.append(float(number))
                 else:
                     ws.write_blank(f"{hours}{row}",None,credit)
                 ws.set_row(row-1,20 if len(label)<55 else 30)
@@ -354,19 +360,21 @@ def build_layout_workbook(items: list[tuple[str, pd.DataFrame, pd.DataFrame]]) -
             if credit_cells:
                 subtotal_row = row
                 ws.write(f"{title}{subtotal_row}","Section subtotal",subtotal)
-                ws.write_formula(f"{hours}{subtotal_row}","=SUM("+",".join(credit_cells)+")",subtotal)
+                ws.write_formula(f"{hours}{subtotal_row}","=SUM("+",".join(credit_cells)+")",subtotal,sum(credit_values))
                 groups.append(subtotal_row)
+                group_values.append(sum(credit_values))
                 row+=2
             ends.append(row)
             summaries.append((cols,groups))
+            side_values.append(sum(group_values))
         bottom=max(ends)+1
-        for (cols, groups), caption in zip(summaries,("LEFT SIDE TOTAL","RIGHT SIDE TOTAL")):
+        for ((cols, groups), cached), caption in zip(zip(summaries,side_values),("LEFT SIDE TOTAL","RIGHT SIDE TOTAL")):
             flag,code,title,hours=cols
             ws.merge_range(f"{flag}{bottom}:{title}{bottom}",caption,total)
             formula="=SUM("+",".join(f"{hours}{r}" for r in groups)+")" if groups else "=0"
-            ws.write_formula(f"{hours}{bottom}",formula,total)
+            ws.write_formula(f"{hours}{bottom}",formula,total,cached)
         ws.merge_range(f"F{bottom+2}:H{bottom+2}","COMBINED EXTRACTED CREDITS",section)
-        ws.write_formula(f"I{bottom+2}",f"=D{bottom}+I{bottom}",subtotal)
+        ws.write_formula(f"I{bottom+2}",f"=D{bottom}+I{bottom}",subtotal,sum(side_values))
         ws.merge_range(f"A{bottom+4}:I{bottom+5}","REVIEW BEFORE APPROVAL: Blank requirements, reused courses, OCR/layout ambiguities and electives may affect totals. Compare against the source PDF. These totals are not an official degree audit.",caution)
         ws.freeze_panes(4,0)
         ws.set_landscape();ws.set_paper(5);ws.fit_to_pages(1,0)
