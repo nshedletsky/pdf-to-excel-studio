@@ -222,3 +222,144 @@ def build_workbook(items: list[tuple[str,pd.DataFrame,str]], add_totals: bool=Tr
         sheet.fit_to_pages(1,0)
     wb.close()
     return output.getvalue()
+
+
+# Layout-preserving curriculum worksheet export. It complements the flat table export.
+LAYOUT_CODE_RE = re.compile(r"\b([A-Z]{2,5})\s*(\d{3}[A-Z]?)\b")
+SECTION_HINT_RE = re.compile(r"(\(\s*\d+\s*(?:credit\s*)?hours?\s*\)|university studies|business major|general electives|support courses|concentration|humanities|communication|social sciences|natural sciences|religious studies|major courses|prerequisites|term \d+)", re.I)
+
+def layout_rows(pdf_bytes: bytes) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Read each page as two independent visual columns; retain blank elective lines."""
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    halves = [[], []]
+    for pageno, page in enumerate(doc, 1):
+        midpoint = page.rect.width / 2
+        for index, (lo, hi) in enumerate(((0, midpoint), (midpoint, page.rect.width+1))):
+            lines = _lines_in_column(page.get_text("words"), lo, hi)
+            for y, x, label in lines:
+                # Student identity fields belong in the header, not curriculum requirements.
+                if re.search(r"^(student (name|id)|entry date|phone number|email address|mailing address)", label, re.I):
+                    continue
+                if not label.strip() or re.fullmatch(r"[_\s]+", label):
+                    continue
+                text = re.sub(r"^\s*(?:(?:_{2,}\s*)+|[☐□]+\s*)", "", label).strip()
+                m = LAYOUT_CODE_RE.search(text)
+                placeholder = bool(re.match(r"^(?:_{2,}|[A-Z]{2,5}_{2,})(?:\s|$)", text))
+                number = None
+                code = ""
+                kind = "Note"
+                title = text
+                if m and m.start() < 22:
+                    kind = "Course"
+                    code = f"{m.group(1)} {m.group(2)}"
+                    title = text[m.end():].strip(" _*†:-")
+                elif placeholder or (re.search(r"_{3,}", text) and len(text)<95):
+                    kind = "Elective / blank"
+                    title = text
+                elif SECTION_HINT_RE.search(text) and len(text)<95 and not re.search(r"recommended:|completed|must have|requirement to",text,re.I):
+                    kind = "Section"
+                # Only parse a single credit figure at the very end, and never
+                # mistake clinical, contact, or total-hour values for course credits.
+                if kind in ("Course", "Elective / blank"):
+                    credit = re.search(r"\s+([1-9]|1[0-2])\s*$",title)
+                    glued = re.search(r"(?<=[A-Za-z])([1-9])$",title)
+                    if credit:
+                        number=int(credit.group(1))
+                        title=title[:credit.start()].strip()
+                    elif glued and not re.search(r"clinical|contact|hours", title, re.I):
+                        number=int(glued.group(1))
+                        title=title[:-1].strip()
+                    if re.search(r"clinical|contact|total hours", title, re.I):
+                        number=None
+                # Do not discard notes, since programs need to be able to edit them.
+                halves[index].append({"Type":kind,"Code":code,"Course / Requirement":title,"Credits":number,"Page":pageno})
+    return tuple(pd.DataFrame(items,columns=["Type","Code","Course / Requirement","Credits","Page"]) for items in halves)
+
+
+def build_layout_workbook(items: list[tuple[str, pd.DataFrame, pd.DataFrame]]) -> bytes:
+    """Print-ready, two-sided editable worksheets with independently calculated section totals."""
+    buf=io.BytesIO()
+    book=xlsxwriter.Workbook(buf,{"in_memory":True,"strings_to_formulas":False,"strings_to_urls":False})
+    used=set()
+    navy=book.add_format({"bold":True,"font_color":"white","bg_color":"#17324D","font_size":14,"align":"center","valign":"vcenter"})
+    banner=book.add_format({"bold":True,"font_color":"white","bg_color":"#17324D","valign":"vcenter"})
+    section=book.add_format({"bold":True,"bg_color":"#DDEBF5","font_color":"#17324D","valign":"vcenter","text_wrap":True})
+    normal=book.add_format({"valign":"top","text_wrap":True})
+    striped=book.add_format({"valign":"top","text_wrap":True,"bg_color":"#F3F6FA"})
+    credit=book.add_format({"num_format":"0","bg_color":"#E9F5EC","valign":"top","align":"center"})
+    subtotal=book.add_format({"bold":True,"bg_color":"#EEF2F7","font_color":"#17324D"})
+    total=book.add_format({"bold":True,"bg_color":"#17324D","font_color":"white"})
+    caution=book.add_format({"bg_color":"#FFF3D8","font_color":"#76520F","text_wrap":True,"valign":"vcenter"})
+    for filename,left,right in items:
+        if left.empty and right.empty:
+            continue
+        ws=book.add_worksheet(safe_sheet_name(filename,used))
+        ws.hide_gridlines(2)
+        ws.set_column("A:A",4);ws.set_column("B:B",12);ws.set_column("C:C",40)
+        ws.set_column("D:D",9);ws.set_column("E:E",3)
+        ws.set_column("F:F",4);ws.set_column("G:G",12);ws.set_column("H:H",40);ws.set_column("I:I",9)
+        ws.merge_range("A1:I2","PROGRAM SHEET  |  EDITABLE CURRICULUM",navy)
+        ws.merge_range("A3:I3",Path(filename).stem.replace("_"," "),section)
+        ws.merge_range("A5:D5","Student Name: _______________________________",normal)
+        ws.merge_range("F5:I5","Student ID: ________________________________",normal)
+        ws.merge_range("A6:D6","Catalog Year: _______________________________",normal)
+        ws.merge_range("F6:I6","Advisor: ___________________________________",normal)
+        ws.merge_range("A8:D8","UNIVERSITY STUDIES / LEFT SIDE",banner)
+        ws.merge_range("F8:I8","MAJOR, SUPPORT & ELECTIVES / RIGHT SIDE",banner)
+        summaries=[]
+        ends=[]
+        for data, cols in ((left,("A","B","C","D")),(right,("F","G","H","I"))):
+            flag,code,title,hours=cols
+            row=9
+            start=None
+            groups=[]
+            for idx,(_, item) in enumerate(data.reset_index(drop=True).iterrows()):
+                kind=str(item["Type"])
+                label=str(item["Course / Requirement"] if pd.notna(item["Course / Requirement"]) else "")
+                number=item["Credits"]
+                if kind=="Section":
+                    if start is not None:
+                        ws.write(row-1,2 if flag=="A" else 7,"Section subtotal",subtotal)
+                        ws.write_formula(row-1,3 if flag=="A" else 8,f"=SUM({hours}{start}:{hours}{row-1})",subtotal)
+                        groups.append(row)
+                        row+=2
+                    ws.merge_range(f"{flag}{row}:{hours}{row}",label,section)
+                    ws.set_row(row-1,25)
+                    row+=1
+                    start=row+1
+                    continue
+                usefmt=striped if idx%2 else normal
+                ws.write_string(f"{flag}{row}","☐" if kind in ("Course","Elective / blank") else "",usefmt)
+                ws.write_string(f"{code}{row}",str(item["Code"] or ""),usefmt)
+                ws.write_string(f"{title}{row}",label,usefmt)
+                if number is not None and not pd.isna(number):
+                    ws.write_number(f"{hours}{row}",float(number),credit)
+                else:
+                    ws.write_blank(f"{hours}{row}",None,credit)
+                ws.set_row(row-1,27 if len(label)<55 else 40)
+                if start is None: start=row
+                row+=1
+            if start is not None:
+                ws.write(f"{title}{row}","Section subtotal",subtotal)
+                ws.write_formula(f"{hours}{row}",f"=SUM({hours}{start}:{hours}{row-1})",subtotal)
+                groups.append(row)
+                row+=2
+            ends.append(row)
+            summaries.append((cols,groups))
+        bottom=max(ends)+1
+        for (cols, groups), caption in zip(summaries,("LEFT SIDE TOTAL","RIGHT SIDE TOTAL")):
+            flag,code,title,hours=cols
+            ws.merge_range(f"{flag}{bottom}:{title}{bottom}",caption,total)
+            formula="=SUM("+",".join(f"{hours}{r}" for r in groups)+")" if groups else "=0"
+            ws.write_formula(f"{hours}{bottom}",formula,total)
+        ws.merge_range(f"F{bottom+2}:H{bottom+2}","COMBINED EXTRACTED CREDITS",section)
+        ws.write_formula(f"I{bottom+2}",f"=D{bottom}+I{bottom}",subtotal)
+        ws.merge_range(f"A{bottom+4}:I{bottom+5}","REVIEW BEFORE APPROVAL: Blank requirements, reused courses, OCR/layout ambiguities and electives may affect totals. Compare against the source PDF. These totals are not an official degree audit.",caution)
+        ws.freeze_panes(8,0)
+        ws.set_landscape();ws.set_paper(9);ws.fit_to_pages(1,1)
+        ws.set_margins(.25,.25,.4,.4)
+        ws.print_area(0,0,bottom+4,8)
+        ws.center_horizontally()
+        ws.set_footer("&CPage &P of &N")
+    book.close()
+    return buf.getvalue()
