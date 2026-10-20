@@ -2,13 +2,15 @@
 from __future__ import annotations
 import hashlib
 import streamlit as st
-from converter import extract_pdf, build_workbook
+from converter import extract_pdf, build_workbook, layout_rows, build_layout_workbook
 
 st.set_page_config(page_title="PDF to Excel",page_icon="📊",layout="wide")
 st.title("PDF to Excel")
 st.write("Upload multiple PDFs and get one editable Excel workbook, with one worksheet per PDF.")
 st.caption("Prototype: works best with selectable-text PDFs. Scanned/image-only PDFs are not supported yet.")
 
+format_choice=st.radio("Excel layout",["Editable two-column program sheet","Extracted data table"],horizontal=True)
+st.caption("The two-column layout keeps the left and right sides separate, including blank requirements and notes.")
 files=st.file_uploader("Upload PDF files",type=["pdf"],accept_multiple_files=True)
 totals=st.checkbox("Add automatic totals where appropriate",value=True,help="For safety, automatic formulas are added only to Credits columns detected in program sheets. Other numeric fields aren't assumed additive.")
 st.info("Clean spreadsheet styling, filters, frozen headings, and worksheet tabs are always enabled.")
@@ -18,6 +20,7 @@ if files:
         st.error("Maximum 15 PDFs per conversion in this prototype.")
         st.stop()
     items=[]
+    layout_items=[]
     # Stable keys preserve edits across Streamlit reruns.
     for idx,up in enumerate(files):
         raw=up.getvalue()
@@ -27,6 +30,21 @@ if files:
                 continue
             try:
                 signature=hashlib.sha256(raw).hexdigest()
+                if format_choice=="Editable two-column program sheet":
+                    layout_key=f"layout_{signature}"
+                    if layout_key not in st.session_state:
+                        st.session_state[layout_key]=layout_rows(raw)
+                    left,right=st.session_state[layout_key]
+                    st.caption("Edit either side below. Course/requirement and credit fields are editable, including blank electives. Choose Section in the Type column to create a section heading.")
+                    col_left,col_right=st.columns(2)
+                    with col_left:
+                        st.markdown("**University Studies / Left side**")
+                        left_edit=st.data_editor(left,key=f"left_{signature}",num_rows="dynamic",hide_index=True,use_container_width=True)
+                    with col_right:
+                        st.markdown("**Major, support & electives / Right side**")
+                        right_edit=st.data_editor(right,key=f"right_{signature}",num_rows="dynamic",hide_index=True,use_container_width=True)
+                    layout_items.append((up.name,left_edit,right_edit))
+                    continue
                 cache_key=f"parsed_{signature}"
                 if cache_key not in st.session_state:
                     st.session_state[cache_key]=extract_pdf(raw,up.name)
@@ -39,6 +57,13 @@ if files:
                 items.append((up.name,edited,meta["mode"]))
             except Exception as ex:
                 st.error(f"Could not process this file: {ex}")
+    if layout_items:
+        try:
+            workbook=build_layout_workbook(layout_items)
+            st.download_button("Download editable program sheets",data=workbook,file_name="editable_program_sheets.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",type="primary")
+            st.caption("To create a PDF after editing, open the workbook in Excel and choose File > Export > Create PDF/XPS. Review the print preview and credits before publishing.")
+        except Exception as ex:
+            st.error(f"Could not create the editable program sheet: {ex}")
     if items:
         try:
             workbook=build_workbook(items,add_totals=totals)
