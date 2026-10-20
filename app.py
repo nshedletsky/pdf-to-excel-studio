@@ -20,8 +20,8 @@ format_choice=st.radio(
     horizontal=False,
 )
 files=st.file_uploader("Upload PDF files",type=["pdf"],accept_multiple_files=True)
-totals=st.checkbox("Add automatic totals where appropriate",value=True,help="For safety, automatic formulas are added only to Credits columns detected in program sheets. Other numeric fields aren't assumed additive.")
-st.info("Clean spreadsheet styling, filters, frozen headings, and worksheet tabs are always enabled.")
+totals=st.checkbox("Add automatic totals where appropriate",value=True,help="will change.")
+st.info(" spreadsheet styling, filters, frozen headings, and worksheet tabs are always enabled.")
 
 if files:
     if len(files)>15:
