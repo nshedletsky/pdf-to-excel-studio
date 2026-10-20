@@ -4,10 +4,10 @@ import hashlib
 import streamlit as st
 from converter import extract_pdf, build_workbook
 
-st.set_page_config(page_title="PDF to Excel Studio",page_icon="📊",layout="wide")
-st.title("PDF to Excel Studio")
-st.write("Upload multiple PDFs and get **one editable Excel workbook**, with **one worksheet per PDF**.")
-st.caption("Prototype: works best with selectable-text PDFs and university program sheets. Scanned/image-only PDFs are not supported yet.")
+st.set_page_config(page_title="PDF to Excel",page_icon="📊",layout="wide")
+st.title("PDF to Excel")
+st.write("Upload multiple PDFs and get one editable Excel workbook, with one worksheet per PDF.")
+st.caption("Prototype: works best with selectable-text PDFs. Scanned/image-only PDFs are not supported yet.")
 
 files=st.file_uploader("Upload PDF files",type=["pdf"],accept_multiple_files=True)
 totals=st.checkbox("Add automatic totals where appropriate",value=True,help="For safety, automatic formulas are added only to Credits columns detected in program sheets. Other numeric fields aren't assumed additive.")
