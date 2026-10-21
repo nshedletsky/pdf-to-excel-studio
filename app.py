@@ -49,18 +49,18 @@ if files:
                     grad_items.append((up.name,graduate))
                     continue
                 if layout_choice in ("Automatically choose the layout", "Two columns (side by side)"):
-                    layout_key=f"layout_{signature}"
+                    layout_key=f"layout_v3_{signature}"
                     if layout_key not in st.session_state:
                         st.session_state[layout_key]=layout_rows(raw)
                     left,right=st.session_state[layout_key]
                     if left.empty and right.empty and layout_choice=="Automatically choose the layout":
                         # Academic level does not determine PDF structure. If the
                         # two-column reader found nothing, try stacked extraction.
-                        fallback_key=f"stacked_{signature}"
+                        fallback_key=f"stacked_v3_{signature}"
                         if fallback_key not in st.session_state:
                             st.session_state[fallback_key]=graduate_rows(raw)
                         st.info("A stacked course layout was detected; this file will use a vertical program sheet.")
-                        stacked_edit=st.data_editor(st.session_state[fallback_key],key=f"stacked_editor_{signature}",num_rows="dynamic",hide_index=True,use_container_width=True)
+                        stacked_edit=st.data_editor(st.session_state[fallback_key],key=f"stacked_editor_v3_{signature}",num_rows="dynamic",hide_index=True,use_container_width=True)
                         grad_items.append((up.name,stacked_edit))
                         continue
                     if left.empty and right.empty:
@@ -70,10 +70,10 @@ if files:
                     col_left,col_right=st.columns(2)
                     with col_left:
                         st.markdown("**University Studies / Left side**")
-                        left_edit=st.data_editor(left,key=f"left_{signature}",num_rows="dynamic",hide_index=True,use_container_width=True)
+                        left_edit=st.data_editor(left,key=f"left_v3_{signature}",num_rows="dynamic",hide_index=True,use_container_width=True)
                     with col_right:
                         st.markdown("**Major, support & electives / Right side**")
-                        right_edit=st.data_editor(right,key=f"right_{signature}",num_rows="dynamic",hide_index=True,use_container_width=True)
+                        right_edit=st.data_editor(right,key=f"right_v3_{signature}",num_rows="dynamic",hide_index=True,use_container_width=True)
                     layout_items.append((up.name,left_edit,right_edit))
                     continue
                 cache_key=f"parsed_{signature}"
