@@ -405,7 +405,12 @@ def layout_rows(pdf_bytes: bytes) -> tuple[pd.DataFrame, pd.DataFrame]:
                     kind = "Course"
                     code = f"{m.group(1)} {m.group(2)}"
                     title = text[m.end():].strip(" _*†:-")
-                elif placeholder or (re.search(r"_{3,}", text) and len(text)<95):
+                elif (placeholder
+                      or (re.search(r"_{3,}", text) and len(text)<95)
+                      or re.match(r"^[A-Z]{2,5}_*\\s+(?:[1-9]|1[0-2])\\s*$", text)):
+                    # Blank requirements may use a partial subject code such as
+                    # "ENG_ 3", "PHIL 3", "RS 3", or "HIST 3".
+                    # Treat these as editable requirement rows, not notes.
                     kind = "Elective / blank"
                     title = text
                 elif SECTION_HINT_RE.search(text) and len(text)<95 and not re.search(r"recommended:|completed|must have|requirement to",text,re.I):
