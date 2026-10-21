@@ -24,7 +24,7 @@ FIELDS=["Type","Code","Course / Requirement","Credits","Page"]
 def blank_rows():
     return pd.DataFrame(columns=FIELDS)
 
-def edit_requirements(data, identifier, label, page=1):
+def edit_requirements(data, identifier, label, page=1, form_first=False):
     """The displayed editor and the add-course controls share the same row data."""
     data_key=f"rows_{identifier}"
     revision_key=f"rev_{identifier}"
@@ -33,16 +33,19 @@ def edit_requirements(data, identifier, label, page=1):
     if revision_key not in st.session_state:
         st.session_state[revision_key]=0
     st.markdown(f"**{label}**")
-    frame=st.data_editor(
-        st.session_state[data_key], key=f"edit_{identifier}_{st.session_state[revision_key]}",
-        num_rows="dynamic",hide_index=True,use_container_width=True,
-        column_config={"Type":st.column_config.SelectboxColumn("Type",options=["Section","Course","Elective / blank","Note"])},
-    )
-    st.session_state[data_key]=frame.copy()
-    st.caption("Use the searchable course dropdown below to add courses directly to this table. You can also type in any cell.")
+    if form_first:
+        frame=st.session_state[data_key].copy()
+        st.caption("Choose what you'd like to add below. Your program sheet preview will appear underneath.")
+    else:
+        frame=st.data_editor(
+            st.session_state[data_key], key=f"edit_{identifier}_{st.session_state[revision_key]}",
+            num_rows="dynamic",hide_index=True,use_container_width=True,
+            column_config={"Type":st.column_config.SelectboxColumn("Type",options=["Section","Course","Elective / blank","Note"])},
+        )
+        st.session_state[data_key]=frame.copy()
     with st.container(border=True):
-        st.markdown("**Add courses or requirements**")
-        kind=st.selectbox("What would you like to add?",["Course from catalog","Proposed / manual course","Section heading","Blank elective / requirement","Note"],key=f"kind_{identifier}")
+        st.markdown("**Step 1: Choose what to add**")
+        kind=st.selectbox("What would you like to add?",["Section heading","Course from catalog","Proposed / manual course","Blank elective / requirement","Note"],key=f"kind_{identifier}")
         course=""
         if kind=="Course from catalog":
             course=st.selectbox("Select a course (type its number or name to search)",COURSE_CHOICES,key=f"catalog_{identifier}")
@@ -57,15 +60,30 @@ def edit_requirements(data, identifier, label, page=1):
         if kind in ("Course from catalog","Proposed / manual course","Blank elective / requirement"):
             entered=st.number_input("Credit hours (confirm from program catalog)",min_value=0.0,max_value=50.0,value=3.0,step=1.0,key=f"credits_{identifier}")
             credits=float(entered)
-        position=st.selectbox("Where should this row go?",["At the end","Before an existing row"],key=f"position_{identifier}")
+        position=st.selectbox("Place this entry",["At the end","Before an existing row"],key=f"position_{identifier}")
         insert_at=len(frame)
         if position=="Before an existing row" and len(frame):
             insert_at=st.number_input("Insert before row number",min_value=1,max_value=len(frame),value=len(frame),step=1,key=f"index_{identifier}")-1
-        if st.button("Add selected item to table",key=f"add_{identifier}",type="primary"):
+        if st.button("Add to program sheet",key=f"add_{identifier}",type="primary"):
             if kind=="Course from catalog":
                 if course==COURSE_CHOICES[0]:
                     st.warning("Choose a course from the list first.")
-                    return frame
+                    if form_first:
+        st.markdown("**Your program sheet so far**")
+        if frame.empty:
+            st.info("Nothing added yet. Start with a section heading, then add courses or requirements.")
+        else:
+            with st.expander("Review, edit, reorder, or delete your entries", expanded=True):
+                updated=st.data_editor(
+                    frame,key=f"edit_{identifier}_{st.session_state[revision_key]}",
+                    num_rows="dynamic",hide_index=True,use_container_width=True,
+                    column_config={"Type":st.column_config.SelectboxColumn("Type",options=["Section","Course","Elective / blank","Note"]),
+                                   "Page":None},
+                )
+                st.session_state[data_key]=updated.copy()
+                frame=updated
+        st.caption("To remove a row, select it in the table and use the delete-row control. You can also edit any cell.")
+    return frame
                 selected=CATALOG.iloc[COURSE_CHOICES.index(course)-1]
                 new={"Type":"Course","Code":str(selected["Course Code"]).replace("-"," "),"Course / Requirement":str(selected["Course Title"]),"Credits":credits,"Page":page}
             else:
@@ -83,21 +101,23 @@ def edit_requirements(data, identifier, label, page=1):
 
 creation_mode=st.radio("How would you like to start?",["Upload existing PDF","Create a new program sheet"],horizontal=True)
 
-layout_choice=st.radio(
-    "How should your Excel program sheet be organized?",
-    ["Automatically choose the layout", "Two columns (side by side)", "Stacked sections (top to bottom)", "Simple data table"],
-    captions=[
-        "Recommended. Uses the two-column format when recognized, otherwise tries stacked course sections.",
-        "Use for program sheets with general education on the left and major requirements on the right.",
-        "Use for program sheets with course sections listed vertically, regardless of academic level.",
-        "Extract courses into a sortable spreadsheet rather than a formatted program sheet."
-    ],
-    index=0,
-)
-st.caption("You can use any layout for undergraduate, graduate, or combined programs.")
+if creation_mode=="Upload existing PDF":
+    layout_choice=st.radio(
+        "How should your Excel program sheet be organized?",
+        ["Automatically choose the layout", "Two columns (side by side)", "Stacked sections (top to bottom)", "Simple data table"],
+        captions=[
+            "Recommended. Uses the two-column format when recognized, otherwise tries stacked course sections.",
+            "Use for program sheets with general education on the left and major requirements on the right.",
+            "Use for program sheets with course sections listed vertically, regardless of academic level.",
+            "Extract courses into a sortable spreadsheet rather than a formatted program sheet."
+        ],
+        index=0,
+    )
+    st.caption("You can use any layout for undergraduate, graduate, or combined programs.")
 files=st.file_uploader("Upload PDF files",type=["pdf"],accept_multiple_files=True) if creation_mode=="Upload existing PDF" else []
-totals=st.checkbox("Add automatic totals to simple data tables where appropriate",value=True)
-st.caption("Review extracted courses and credits against the original PDF before publishing.")
+totals=st.checkbox("Add automatic totals to simple data tables where appropriate",value=True) if creation_mode=="Upload existing PDF" else True
+if creation_mode=="Upload existing PDF":
+    st.caption("Review extracted courses and credits against the original PDF before publishing.")
 
 if creation_mode=="Create a new program sheet":
     name=st.text_input("Program name",value="New Program")
@@ -108,14 +128,14 @@ if creation_mode=="Create a new program sheet":
     if manual_format=="Two columns (side by side)":
         first,second=st.columns(2)
         with first:
-            left=edit_requirements(blank_rows(),uid+"_left","University Studies / Left side")
+            left=edit_requirements(blank_rows(),uid+"_left","University Studies / Left side",form_first=True)
         with second:
-            right=edit_requirements(blank_rows(),uid+"_right","Major, support & electives / Right side")
+            right=edit_requirements(blank_rows(),uid+"_right","Major, support & electives / Right side",form_first=True)
         if not left.empty or not right.empty:
             workbook=build_layout_workbook([(output_name,left,right)])
             st.download_button("Download new program sheet",data=workbook,file_name="new_program_sheet.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",type="primary")
     else:
-        graduate=edit_requirements(blank_rows(),uid+"_stacked","Program sections")
+        graduate=edit_requirements(blank_rows(),uid+"_stacked","Program sections",form_first=True)
         if not graduate.empty:
             workbook=build_graduate_workbook([(output_name,graduate)])
             st.download_button("Download new program sheet",data=workbook,file_name="new_program_sheet.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",type="primary")
