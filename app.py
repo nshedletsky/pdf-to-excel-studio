@@ -25,79 +25,106 @@ def blank_rows():
     return pd.DataFrame(columns=FIELDS)
 
 def edit_requirements(data, identifier, label, page=1, form_first=False):
-    """The displayed editor and the add-course controls share the same row data."""
+    """Add and edit requirements without losing rows across Streamlit reruns."""
     data_key=f"rows_{identifier}"
     revision_key=f"rev_{identifier}"
     if data_key not in st.session_state:
         st.session_state[data_key]=data.copy()
     if revision_key not in st.session_state:
         st.session_state[revision_key]=0
+
     st.markdown(f"**{label}**")
     if form_first:
         frame=st.session_state[data_key].copy()
-        st.caption("Choose what you'd like to add below. Your program sheet preview will appear underneath.")
+        st.caption("Add a section or course below. Your program sheet preview appears afterward.")
     else:
         frame=st.data_editor(
-            st.session_state[data_key], key=f"edit_{identifier}_{st.session_state[revision_key]}",
+            st.session_state[data_key],
+            key=f"edit_{identifier}_{st.session_state[revision_key]}",
             num_rows="dynamic",hide_index=True,use_container_width=True,
-            column_config={"Type":st.column_config.SelectboxColumn("Type",options=["Section","Course","Elective / blank","Note"])},
+            column_config={"Type":st.column_config.SelectboxColumn(
+                "Type",options=["Section","Course","Elective / blank","Note"])},
         )
         st.session_state[data_key]=frame.copy()
+
     with st.container(border=True):
-        st.markdown("**Step 1: Choose what to add**")
-        kind=st.selectbox("What would you like to add?",["Section heading","Course from catalog","Proposed / manual course","Blank elective / requirement","Note"],key=f"kind_{identifier}")
+        st.markdown("**Add courses or requirements**")
+        kind=st.selectbox(
+            "What would you like to add?",
+            ["Section heading","Course from catalog","Proposed / manual course","Blank elective / requirement","Note"],
+            key=f"kind_{identifier}")
         course=""
         if kind=="Course from catalog":
-            course=st.selectbox("Select a course (type its number or name to search)",COURSE_CHOICES,key=f"catalog_{identifier}")
+            course=st.selectbox(
+                "Search courses by number or title",COURSE_CHOICES,
+                key=f"catalog_{identifier}")
         manual_code=""
         title=""
         if kind=="Proposed / manual course":
             manual_code=st.text_input("Course code (optional)",key=f"code_{identifier}")
             title=st.text_input("Course title",key=f"title_{identifier}")
-        if kind in ("Section heading","Blank elective / requirement","Note"):
+        elif kind in ("Section heading","Blank elective / requirement","Note"):
             title=st.text_input("Section name or requirement",key=f"title_{identifier}")
         credits=None
         if kind in ("Course from catalog","Proposed / manual course","Blank elective / requirement"):
-            entered=st.number_input("Credit hours (confirm from program catalog)",min_value=0.0,max_value=50.0,value=3.0,step=1.0,key=f"credits_{identifier}")
-            credits=float(entered)
-        position=st.selectbox("Place this entry",["At the end","Before an existing row"],key=f"position_{identifier}")
+            credits=float(st.number_input(
+                "Credit hours (confirm with catalog)",min_value=0.0,max_value=50.0,
+                value=3.0,step=1.0,key=f"credits_{identifier}"))
+        position=st.selectbox(
+            "Place this entry",["At the end","Before an existing row"],
+            key=f"position_{identifier}")
         insert_at=len(frame)
-        if position=="Before an existing row" and len(frame):
-            insert_at=st.number_input("Insert before row number",min_value=1,max_value=len(frame),value=len(frame),step=1,key=f"index_{identifier}")-1
+        if position=="Before an existing row" and not frame.empty:
+            insert_at=int(st.number_input(
+                "Insert before row number",min_value=1,max_value=len(frame),
+                value=len(frame),step=1,key=f"index_{identifier}"))-1
+
         if st.button("Add to program sheet",key=f"add_{identifier}",type="primary"):
+            new=None
             if kind=="Course from catalog":
                 if course==COURSE_CHOICES[0]:
-                    st.warning("Choose a course from the list first.")
-                    if form_first:
+                    st.warning("Select a course from the catalog first.")
+                else:
+                    selected=CATALOG.iloc[COURSE_CHOICES.index(course)-1]
+                    new={"Type":"Course",
+                         "Code":str(selected["Course Code"]).replace("-"," "),
+                         "Course / Requirement":str(selected["Course Title"]),
+                         "Credits":credits,"Page":page}
+            else:
+                types={"Proposed / manual course":"Course",
+                       "Section heading":"Section",
+                       "Blank elective / requirement":"Elective / blank",
+                       "Note":"Note"}
+                if not title.strip():
+                    st.warning("Enter a title or requirement first.")
+                else:
+                    new={"Type":types[kind],"Code":manual_code.strip(),
+                         "Course / Requirement":title.strip(),
+                         "Credits":credits,"Page":page}
+            if new is not None:
+                rows=frame.to_dict("records")
+                rows.insert(insert_at,new)
+                st.session_state[data_key]=pd.DataFrame(rows,columns=FIELDS)
+                st.session_state[revision_key]+=1
+                st.rerun()
+
+    if form_first:
         st.markdown("**Your program sheet so far**")
         if frame.empty:
             st.info("Nothing added yet. Start with a section heading, then add courses or requirements.")
         else:
-            with st.expander("Review, edit, reorder, or delete your entries", expanded=True):
-                updated=st.data_editor(
-                    frame,key=f"edit_{identifier}_{st.session_state[revision_key]}",
-                    num_rows="dynamic",hide_index=True,use_container_width=True,
-                    column_config={"Type":st.column_config.SelectboxColumn("Type",options=["Section","Course","Elective / blank","Note"]),
-                                   "Page":None},
-                )
-                st.session_state[data_key]=updated.copy()
-                frame=updated
-        st.caption("To remove a row, select it in the table and use the delete-row control. You can also edit any cell.")
+            updated=st.data_editor(
+                frame,key=f"edit_{identifier}_{st.session_state[revision_key]}",
+                num_rows="dynamic",hide_index=True,use_container_width=True,
+                column_config={"Type":st.column_config.SelectboxColumn(
+                    "Type",options=["Section","Course","Elective / blank","Note"]),
+                               "Page":None},
+            )
+            st.session_state[data_key]=updated.copy()
+            frame=updated
+        st.caption("Edit cells directly or use the table's row controls to remove entries.")
     return frame
-                selected=CATALOG.iloc[COURSE_CHOICES.index(course)-1]
-                new={"Type":"Course","Code":str(selected["Course Code"]).replace("-"," "),"Course / Requirement":str(selected["Course Title"]),"Credits":credits,"Page":page}
-            else:
-                types={"Proposed / manual course":"Course","Section heading":"Section","Blank elective / requirement":"Elective / blank","Note":"Note"}
-                if not title.strip():
-                    st.warning("Enter a title or requirement first.")
-                    return frame
-                new={"Type":types[kind],"Code":manual_code.strip(),"Course / Requirement":title.strip(),"Credits":credits,"Page":page}
-            rows=frame.to_dict("records")
-            rows.insert(int(insert_at),new)
-            st.session_state[data_key]=pd.DataFrame(rows,columns=FIELDS)
-            st.session_state[revision_key]+=1
-            st.rerun()
-    return frame
+
 
 creation_mode=st.radio("How would you like to start?",["Upload existing PDF","Create a new program sheet"],horizontal=True)
 
