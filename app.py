@@ -39,11 +39,13 @@ def edit_requirements(data, identifier, label, page=1):
         column_config={"Type":st.column_config.SelectboxColumn("Type",options=["Section","Course","Elective / blank","Note"])},
     )
     st.session_state[data_key]=frame.copy()
-    with st.expander(f"Add a course, section, elective, or note to {label}"):
+    st.caption("Use the searchable course dropdown below to add courses directly to this table. You can also type in any cell.")
+    with st.container(border=True):
+        st.markdown("**Add courses or requirements**")
         kind=st.selectbox("What would you like to add?",["Course from catalog","Proposed / manual course","Section heading","Blank elective / requirement","Note"],key=f"kind_{identifier}")
         course=""
         if kind=="Course from catalog":
-            course=st.selectbox("Search courses by code or title",COURSE_CHOICES,key=f"catalog_{identifier}")
+            course=st.selectbox("Select a course (type its number or name to search)",COURSE_CHOICES,key=f"catalog_{identifier}")
         manual_code=""
         title=""
         if kind=="Proposed / manual course":
@@ -59,7 +61,7 @@ def edit_requirements(data, identifier, label, page=1):
         insert_at=len(frame)
         if position=="Before an existing row" and len(frame):
             insert_at=st.number_input("Insert before row number",min_value=1,max_value=len(frame),value=len(frame),step=1,key=f"index_{identifier}")-1
-        if st.button("Add to table",key=f"add_{identifier}"):
+        if st.button("Add selected item to table",key=f"add_{identifier}",type="primary"):
             if kind=="Course from catalog":
                 if course==COURSE_CHOICES[0]:
                     st.warning("Choose a course from the list first.")
