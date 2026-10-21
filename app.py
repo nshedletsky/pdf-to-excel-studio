@@ -34,14 +34,15 @@ def edit_requirements(data, identifier, label, page=1, form_first=False):
         st.session_state[revision_key]=0
 
     st.markdown(f"**{label}**")
+    st.caption("Row numbers start at 1 and are used only to place new entries; they won't appear in Excel.")
     if form_first:
         frame=st.session_state[data_key].copy()
         st.caption("Add a section or course below. Your program sheet preview appears afterward.")
     else:
         frame=st.data_editor(
-            st.session_state[data_key],
+            st.session_state[data_key].set_axis(range(1,len(st.session_state[data_key])+1)),
             key=f"edit_{identifier}_{st.session_state[revision_key]}",
-            num_rows="dynamic",hide_index=True,use_container_width=True,
+            num_rows="dynamic",hide_index=False,use_container_width=True,
             column_config={"Type":st.column_config.SelectboxColumn(
                 "Type",options=["Section","Course","Elective / blank","Note"])},
         )
@@ -76,7 +77,7 @@ def edit_requirements(data, identifier, label, page=1, form_first=False):
         insert_at=len(frame)
         if position=="Before an existing row" and not frame.empty:
             insert_at=int(st.number_input(
-                "Insert before row number",min_value=1,max_value=len(frame),
+                "Insert before row # shown in the table",min_value=1,max_value=len(frame),
                 value=len(frame),step=1,key=f"index_{identifier}"))-1
 
         if st.button("Add to program sheet",key=f"add_{identifier}",type="primary"):
@@ -114,8 +115,8 @@ def edit_requirements(data, identifier, label, page=1, form_first=False):
             st.info("Nothing added yet. Start with a section heading, then add courses or requirements.")
         else:
             updated=st.data_editor(
-                frame,key=f"edit_{identifier}_{st.session_state[revision_key]}",
-                num_rows="dynamic",hide_index=True,use_container_width=True,
+                frame.set_axis(range(1,len(frame)+1)),key=f"edit_{identifier}_{st.session_state[revision_key]}",
+                num_rows="dynamic",hide_index=False,use_container_width=True,
                 column_config={"Type":st.column_config.SelectboxColumn(
                     "Type",options=["Section","Course","Elective / blank","Note"]),
                                "Page":None},
