@@ -385,7 +385,7 @@ def layout_rows(pdf_bytes: bytes) -> tuple[pd.DataFrame, pd.DataFrame]:
                 if not started:
                     if index == 0 and re.search(r"^UNIVERSITY STUDIES PROGRAM",text,re.I):
                         started = True
-                    elif index == 1 and re.search(r"^(?:Business Major|Major Courses|Required Prerequisites|Upper Division|Core Courses|Program Requirements)",text,re.I):
+                    elif index == 1 and re.search(r"^(?:Accounting Major|Business Major|Major Courses|Required Prerequisites|Upper Division|Core Courses|Program Requirements)",text,re.I):
                         started = True
                     else:
                         continue
